@@ -3,6 +3,8 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import { supabase } from "./lib/supabase.js";
+import articleRoutes from "./routes/articles.js";
+import categoryRoutes from "./routes/categories.js";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -23,11 +25,11 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.get("/api", (_req, res) => {
-  res.json({
-    name: "News App API",
-    version: "0.1.0"
-  });
+  res.json({ name: "News App API", version: "0.1.0" });
 });
+
+app.use("/api/articles", articleRoutes);
+app.use("/api/categories", categoryRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: "Route not found" });
