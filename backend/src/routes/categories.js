@@ -10,6 +10,12 @@ router.get("/", async (_req, res) => {
     .order("name");
 
   if (error) {
+    console.error("Categories query failed:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint
+    });
     return res.status(500).json({ error: "Unable to load categories" });
   }
 
