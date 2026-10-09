@@ -25,15 +25,21 @@ router.post("/register", async (req, res) => {
   }
 
   const user = req.authUser;
-  const { error: profileError } = await supabase.from("profiles").upsert({
-    id: user.id,
-    phone: user.phone || null,
-    email: user.email || null,
-    updated_at: new Date().toISOString()
-  }, { onConflict: "id" });
-  if (profileError) {
-    console.error("Device profile bootstrap failed:", profileError.message);
-    return res.status(500).json({ error: "Unable to register device" });
+  const { data: profile, error: profileLookupError } = await supabase.from("profiles")
+    .select("id")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (profileLookupError) return res.status(500).json({ error: "Unable to register device" });
+  if (!profile) {
+    const { error: profileInsertError } = await supabase.from("profiles").insert({
+      id: user.id,
+      phone: user.phone || null,
+      email: user.email || null
+    });
+    if (profileInsertError) {
+      console.error("Device profile bootstrap failed:", profileInsertError.message);
+      return res.status(500).json({ error: "Unable to register device" });
+    }
   }
 
   const { data, error } = await supabase.from("devices").upsert({
