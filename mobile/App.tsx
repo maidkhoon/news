@@ -220,7 +220,7 @@ export default function App() {
       const slug = typeof data?.articleSlug === 'string' ? data.articleSlug : ''
       if (!slug) return
       setScreen('home')
-      fetch(`${API_BASE}/api/articles/${encodeURIComponent(slug)}`)
+      fetch(`${API_BASE}/api/articles/${encodeURIComponent(slug)}`, { headers: { Authorization: `Bearer ${session?.access_token || ''}` } })
         .then(async response => {
           const json = await response.json()
           if (response.ok && json.data) setSelectedArticle(json.data)
@@ -238,7 +238,7 @@ export default function App() {
   const openArticle = async (article: Article) => {
     setSelectedArticle(article)
     try {
-      const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(article.slug)}`)
+      const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(article.slug)}`, { headers: { Authorization: `Bearer ${session.access_token}` } })
       const json = await response.json()
       if (response.status === 403 || json.error === 'PREMIUM_REQUIRED') {
         Alert.alert('Premium research', 'An active BazaarNexa subscription is required to read this report.', [{ text: 'Not now' }, { text: 'View plans', onPress: () => setScreen('plans') }])
@@ -415,7 +415,7 @@ export default function App() {
             <Pressable key={item.id} style={styles.notificationCard} onPress={() => {
               const slug = item.articles?.slug
               if (!slug) return
-              fetch(`${API_BASE}/api/articles/${encodeURIComponent(slug)}`).then(async response => {
+              fetch(`${API_BASE}/api/articles/${encodeURIComponent(slug)}`, { headers: { Authorization: `Bearer ${session.access_token}` } }).then(async response => {
                 const json = await response.json()
                 if (response.ok && json.data) { setSelectedArticle(json.data); setScreen('home') }
                 else if (response.status === 403) Alert.alert('Premium research', 'An active subscription is required.', [{ text: 'Cancel' }, { text: 'View plans', onPress: () => setScreen('plans') }])
@@ -628,6 +628,26 @@ const styles = StyleSheet.create({
   backText: { color: COLORS.blueLight, fontSize: 15, fontWeight: '700' },
   detailBrand: { color: COLORS.text, fontWeight: '800', fontSize: 16 },
   detailContent: { padding: 18, paddingBottom: 35 },
+  plansContent: { padding: 18, paddingBottom: 38 },
+  plansHero: { backgroundColor: '#0C2B4C', borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 20, marginBottom: 17, gap: 10 },
+  plansTitle: { color: COLORS.text, fontSize: 25, fontWeight: '900', lineHeight: 31, marginBottom: 7 },
+  activePlanCard: { backgroundColor: '#103A30', borderWidth: 1, borderColor: '#1E8C6A', borderRadius: 14, padding: 15, marginBottom: 16, gap: 5 },
+  activePlanTitle: { color: '#7DF0C2', fontSize: 15, fontWeight: '800' },
+  cycleToggle: { flexDirection: 'row', backgroundColor: COLORS.surface, borderRadius: 13, padding: 4, marginBottom: 15, borderWidth: 1, borderColor: COLORS.border },
+  cycleButton: { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 10 },
+  cycleButtonActive: { backgroundColor: COLORS.blue },
+  cycleText: { color: COLORS.muted, fontSize: 12, fontWeight: '800' },
+  cycleTextActive: { color: '#FFFFFF' },
+  planCard: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 18, padding: 17, marginBottom: 14 },
+  planCardSelected: { borderColor: '#E8BE50', borderWidth: 2 },
+  planTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 7, marginBottom: 14 },
+  planName: { color: COLORS.text, fontSize: 20, fontWeight: '900' },
+  planPrice: { color: '#FFD56A', fontSize: 17, fontWeight: '900' },
+  planFeature: { color: '#C8D8E9', fontSize: 13, lineHeight: 22, marginBottom: 5 },
+  paymentMethod: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 15, padding: 17, marginVertical: 15, gap: 8 },
+  paymentMethodTitle: { color: COLORS.text, fontSize: 16, fontWeight: '800' },
+  notificationCard: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, padding: 15, marginBottom: 11, gap: 7 },
+  notificationTitle: { color: COLORS.text, fontSize: 15, fontWeight: '800', lineHeight: 21 },
   detailImage: { width: '100%', height: 220, borderRadius: 15, marginBottom: 18, backgroundColor: COLORS.surface },
   categoryLabel: { color: COLORS.blueLight, fontSize: 11, fontWeight: '900', letterSpacing: 1, marginBottom: 9 },
   detailTitle: { color: COLORS.text, fontSize: 27, fontWeight: '900', lineHeight: 34, marginBottom: 12 },
