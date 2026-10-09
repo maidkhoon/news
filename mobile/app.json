@@ -7,7 +7,10 @@
     "userInterfaceStyle": "dark",
     "android": {
       "package": "com.maidkhoon.news",
-      "permissions": ["NOTIFICATIONS", "VIBRATE"]
+      "permissions": [
+        "NOTIFICATIONS",
+        "VIBRATE"
+      ]
     },
     "plugins": [
       [
@@ -16,7 +19,8 @@
           "color": "#087BFF",
           "defaultChannel": "market-research"
         }
-      ]
+      ],
+      "expo-iap"
     ],
     "extra": {
       "apiBaseUrl": "https://news-api-egmd.onrender.com"
