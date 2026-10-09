@@ -21,17 +21,22 @@ router.use(requireUser);
 
 router.get("/me", async (req, res) => {
   const user = req.authUser;
-  const payload = {
+  const { data: existing, error: lookupError } = await supabase.from("profiles")
+    .select("id")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (lookupError) return res.status(500).json({ error: "Unable to load profile" });
+
+  const profilePayload = {
     id: user.id,
     phone: user.phone || null,
     email: user.email || null,
     updated_at: new Date().toISOString()
   };
-  const { data, error } = await supabase
-    .from("profiles")
-    .upsert(payload, { onConflict: "id" })
-    .select("id,name,phone,email,role,status")
-    .single();
+  const operation = existing
+    ? supabase.from("profiles").update({ phone: profilePayload.phone, email: profilePayload.email, updated_at: profilePayload.updated_at }).eq("id", user.id)
+    : supabase.from("profiles").insert(profilePayload);
+  const { data, error } = await operation.select("id,name,phone,email,role,status").single();
 
   if (error) {
     console.error("Profile bootstrap failed:", error.message);
