@@ -65,6 +65,13 @@ export default function App() {
   const [savedIds, setSavedIds] = useState<string[]>([])
 
   useEffect(() => {
+    AsyncStorage.getItem(SAVED_STORAGE_KEY).then(value => {
+      if (value) {
+        const parsed = JSON.parse(value)
+        if (Array.isArray(parsed)) setSavedIds(parsed.filter(id => typeof id === 'string'))
+      }
+    }).catch(() => undefined)
+
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setInitializing(false)
@@ -134,9 +141,99 @@ export default function App() {
     }
   }, [])
 
+  const loadMemberData = useCallback(async (accessToken: string) => {
+    const headers = { Authorization: `Bearer ${accessToken}` }
+    try {
+      await fetch(`${API_BASE}/api/users/me`, { headers })
+      const response = await fetch(`${API_BASE}/api/subscriptions/me`, { headers })
+      if (response.ok) {
+        const json = await response.json()
+        setActiveSubscription(json.data || null)
+      }
+    } catch {
+      // Free research remains available when membership APIs are offline.
+    }
+  }, [])
+
+  const loadNotifications = useCallback(async () => {
+    if (!session?.access_token) return
+    setNotificationsLoading(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/notifications`, {
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      })
+      if (response.ok) {
+        const json = await response.json()
+        setNotificationItems(Array.isArray(json.data) ? json.data : [])
+      }
+    } catch {
+      // The screen will show an empty state if notifications cannot be loaded.
+    } finally {
+      setNotificationsLoading(false)
+    }
+  }, [session?.access_token])
+
+  const registerPushDevice = useCallback(async (accessToken: string) => {
+    if (!Device.isDevice) return
+    try {
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('market-research', {
+          name: 'Market research',
+          importance: Notifications.AndroidImportance.DEFAULT,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#087BFF',
+        })
+      }
+      const current = await Notifications.getPermissionsAsync()
+      let status = current.status
+      if (status !== 'granted') status = (await Notifications.requestPermissionsAsync()).status
+      if (status !== 'granted') return
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId || (Constants as any).easConfig?.projectId
+      if (!projectId) {
+        console.warn('Set the EAS projectId to enable remote push notifications.')
+        return
+      }
+      const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data
+      await fetch(`${API_BASE}/api/devices/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ token, platform: Platform.OS === 'ios' ? 'ios' : 'android' }),
+      })
+    } catch (error) {
+      console.warn('Push registration failed:', error instanceof Error ? error.message : error)
+    }
+  }, [])
+
   useEffect(() => {
-    if (session) loadFeed()
-  }, [session, loadFeed])
+    if (session) {
+      loadFeed()
+      loadMemberData(session.access_token)
+      void registerPushDevice(session.access_token)
+    } else {
+      setActiveSubscription(null)
+    }
+  }, [session, loadFeed, loadMemberData, registerPushDevice])
+
+  useEffect(() => {
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data
+      const slug = typeof data?.articleSlug === 'string' ? data.articleSlug : ''
+      if (!slug) return
+      setScreen('home')
+      fetch(`${API_BASE}/api/articles/${encodeURIComponent(slug)}`)
+        .then(async response => {
+          const json = await response.json()
+          if (response.ok && json.data) setSelectedArticle(json.data)
+          else if (response.status === 403) Alert.alert('Premium research', 'An active subscription is required to read this article.')
+        })
+        .catch(() => Alert.alert('Article unavailable', 'Please open BazaarNexa and try again.'))
+    })
+    return () => responseSubscription.remove()
+  }, [])
+
+  useEffect(() => {
+    AsyncStorage.setItem(SAVED_STORAGE_KEY, JSON.stringify(savedIds)).catch(() => undefined)
+  }, [savedIds])
 
   const openArticle = async (article: Article) => {
     setSelectedArticle(article)
@@ -168,7 +265,15 @@ export default function App() {
     setStep('phone')
     setOtp('')
     setSelectedArticle(null)
+    setScreen('home')
   }
+
+  const choosePlan = (plan: 'BASIC' | 'PRO') => {
+    setChosenPlan(plan)
+    setScreen('payment')
+  }
+
+  const formatExpiry = (value: string) => new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
   if (initializing) {
     return <SafeAreaView style={styles.loadingScreen}><StatusBar barStyle="light-content" backgroundColor={COLORS.background} /><ActivityIndicator color={COLORS.blue} size="large" /><Text style={styles.muted}>Preparing BazaarNexa…</Text></SafeAreaView>
