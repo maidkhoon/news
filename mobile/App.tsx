@@ -255,7 +255,7 @@ export default function App() {
         .catch(() => Alert.alert('Article unavailable', 'Please open BazaarNexa and try again.'))
     })
     return () => responseSubscription.remove()
-  }, [])
+  }, [session?.access_token])
 
   useEffect(() => {
     AsyncStorage.setItem(SAVED_STORAGE_KEY, JSON.stringify(savedIds)).catch(() => undefined)
