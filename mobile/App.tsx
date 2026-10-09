@@ -60,6 +60,7 @@ export default function App() {
   const [filter, setFilter] = useState('All')
   const [tab, setTab] = useState<Tab>('Home')
   const [search, setSearch] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
   const [savedIds, setSavedIds] = useState<string[]>([])
 
@@ -232,11 +233,11 @@ export default function App() {
       <View style={styles.header}>
         <View style={styles.brandMark}><Text style={styles.brandMarkText}>↗</Text></View>
         <View style={styles.headerCopy}><Text style={styles.headerTitle}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text><Text style={styles.headerSub}>INDIA & CRYPTO RESEARCH</Text></View>
-        <Pressable onPress={() => setSearch(s => s ? '' : ' ')} style={styles.headerIcon}><Text style={styles.headerIconText}>⌕</Text></Pressable>
+        <Pressable onPress={() => { setSearchOpen(open => !open); setSearch('') }} style={styles.headerIcon}><Text style={styles.headerIconText}>⌕</Text></Pressable>
         <Pressable onPress={() => Alert.alert('Notifications', 'Market research notifications will be available in a later milestone.')} style={styles.headerIcon}><Text style={styles.headerIconText}>♧</Text></Pressable>
         <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || 'member'), [{ text: 'Close' }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar}><Text style={styles.avatarText}>●</Text></Pressable>
       </View>
-      {search === ' ' ? <View style={styles.searchRow}><TextInput autoFocus value="" onChangeText={setSearch} placeholder="Search research…" placeholderTextColor={COLORS.muted} style={styles.searchInput} /></View> : null}
+      {searchOpen ? <View style={styles.searchRow}><TextInput autoFocus value={search} onChangeText={setSearch} placeholder="Search research…" placeholderTextColor={COLORS.muted} style={styles.searchInput} /></View> : null}
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadFeed(true)} tintColor={COLORS.blue} />}
