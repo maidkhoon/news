@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import Constants from 'expo-constants'
+import * as Device from 'expo-device'
+import * as Notifications from 'expo-notifications'
 import {
   ActivityIndicator,
   Alert,
@@ -12,6 +16,7 @@ import {
   Text,
   TextInput,
   View,
+  Platform,
 } from 'react-native'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
@@ -30,6 +35,21 @@ type Article = {
   categories?: { name?: string; slug?: string } | null
 }
 type Tab = 'Home' | 'Crypto' | 'Sensex' | 'Nifty 50'
+type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved'
+type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
+type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
+
+const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+})
 
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://news-api-egmd.onrender.com').replace(/\/$/, '')
 const NAV_TABS: Tab[] = ['Home', 'Crypto', 'Sensex', 'Nifty 50']
@@ -63,6 +83,12 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
   const [savedIds, setSavedIds] = useState<string[]>([])
+  const [screen, setScreen] = useState<AppScreen>('home')
+  const [notificationItems, setNotificationItems] = useState<NewsNotification[]>([])
+  const [notificationsLoading, setNotificationsLoading] = useState(false)
+  const [activeSubscription, setActiveSubscription] = useState<Subscription | null>(null)
+  const [planCycle, setPlanCycle] = useState<'monthly' | 'yearly'>('monthly')
+  const [chosenPlan, setChosenPlan] = useState<'BASIC' | 'PRO'>('BASIC')
 
   useEffect(() => {
     AsyncStorage.getItem(SAVED_STORAGE_KEY).then(value => {
