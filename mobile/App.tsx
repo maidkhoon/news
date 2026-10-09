@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import Constants from 'expo-constants'
 import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
-import { useIAP } from 'expo-iap'
+import { getAvailablePurchases, useIAP } from 'expo-iap'
 import {
   ActivityIndicator,
   Alert,
@@ -270,7 +270,7 @@ export default function App() {
     },
     onError: (error: Error) => console.warn('Billing error:', error.message),
   })
-  const { connected: billingConnected, subscriptions: billingProducts, fetchProducts, requestPurchase, finishTransaction, getAvailablePurchases } = iap
+  const { connected: billingConnected, subscriptions: billingProducts, fetchProducts, requestPurchase, finishTransaction } = iap
 
   useEffect(() => {
     finishTransactionRef.current = finishTransaction as any
@@ -298,7 +298,10 @@ export default function App() {
       Alert.alert('Plan unavailable', 'Google Play has not returned this subscription product. Check the product ID and Play Console setup.')
       return
     }
-    const offers = product.subscriptionOfferDetailsAndroid || []
+    const offers =
+      Platform.OS === 'android' && 'subscriptionOfferDetailsAndroid' in product
+        ? product.subscriptionOfferDetailsAndroid
+        : []
     if (!offers.length) {
       Alert.alert('Plan unavailable', 'Google Play did not return a subscription offer for this product. Check its base plan and offer configuration in Play Console.')
       return
@@ -328,7 +331,7 @@ export default function App() {
         return
       }
       let restored = false
-      for (const purchase of purchases as any[]) {
+      for (const purchase of purchases) {
         const productId = purchase.productId || purchase.id
         const purchaseToken = purchase.purchaseToken
         if (typeof productId !== 'string' || typeof purchaseToken !== 'string') continue
@@ -389,6 +392,7 @@ export default function App() {
   }, [savedIds, savedLoaded])
 
   const openArticle = async (article: Article) => {
+    if (!session?.access_token) return
     setSelectedArticle(article)
     try {
       const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(article.slug)}`, { headers: { Authorization: `Bearer ${session.access_token}` } })
@@ -757,7 +761,7 @@ const styles = StyleSheet.create({
   premiumText: { color: '#FFD56A', fontSize: 11, fontWeight: '800' },
   heroCard: { height: 228, borderRadius: 18, overflow: 'hidden', backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, marginBottom: 25 },
   heroImage: { width: '100%', height: '100%', position: 'absolute' },
-  heroImageFallback: { ...StyleSheet.absoluteFillObject, backgroundColor: '#103D68', justifyContent: 'center', alignItems: 'center' },
+  heroImageFallback: { ...StyleSheet.absoluteFill, backgroundColor: '#103D68', justifyContent: 'center', alignItems: 'center' },
   heroChart: { color: '#50C4FF', fontSize: 19, fontWeight: '900' },
   heroOverlay: { flex: 1, justifyContent: 'flex-end', padding: 16, backgroundColor: 'rgba(3,14,28,0.48)' },
   heroTag: { color: '#7FE4D0', fontSize: 10, fontWeight: '900', letterSpacing: 1, marginBottom: 7 },
