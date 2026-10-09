@@ -241,7 +241,7 @@ export default function App() {
       const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(article.slug)}`)
       const json = await response.json()
       if (response.status === 403 || json.error === 'PREMIUM_REQUIRED') {
-        Alert.alert('Premium research', 'This article requires an active subscription. Subscription access will be added in the next milestone.')
+        Alert.alert('Premium research', 'An active BazaarNexa subscription is required to read this report.', [{ text: 'Not now' }, { text: 'View plans', onPress: () => setScreen('plans') }])
         return
       }
       if (response.ok && json.data) setSelectedArticle(json.data)
@@ -332,6 +332,129 @@ export default function App() {
     )
   }
 
+  if (screen === 'plans' || screen === 'payment') {
+    const basicPrice = planCycle === 'monthly' ? '₹499 / month' : '₹3,599 / year'
+    const proPrice = planCycle === 'monthly' ? '₹999 / month' : '₹7,199 / year'
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <View style={styles.detailHeader}>
+          <Pressable onPress={() => setScreen(screen === 'payment' ? 'plans' : 'home')} style={styles.backButton}><Text style={styles.backText}>‹  Back</Text></Pressable>
+          <Text style={styles.detailBrand}>{screen === 'plans' ? 'Choose your plan' : 'Payment details'}</Text>
+          <View style={{ width: 48 }} />
+        </View>
+        <ScrollView contentContainerStyle={styles.plansContent}>
+          {screen === 'plans' ? (
+            <>
+              <View style={styles.plansHero}>
+                <Text style={styles.premiumText}>♛ BAZAARNEXA PREMIUM</Text>
+                <Text style={styles.plansTitle}>Research with more depth.</Text>
+                <Text style={styles.muted}>Unlock premium articles, detailed company and sector analysis, and market reports.</Text>
+              </View>
+              {activeSubscription ? (
+                <View style={styles.activePlanCard}>
+                  <Text style={styles.activePlanTitle}>Your subscription is active</Text>
+                  <Text style={styles.muted}>{activeSubscription.plan_type} · valid until {formatExpiry(activeSubscription.expiry_date)}</Text>
+                </View>
+              ) : null}
+              <View style={styles.cycleToggle}>
+                <Pressable onPress={() => setPlanCycle('monthly')} style={[styles.cycleButton, planCycle === 'monthly' && styles.cycleButtonActive]}><Text style={[styles.cycleText, planCycle === 'monthly' && styles.cycleTextActive]}>Monthly</Text></Pressable>
+                <Pressable onPress={() => setPlanCycle('yearly')} style={[styles.cycleButton, planCycle === 'yearly' && styles.cycleButtonActive]}><Text style={[styles.cycleText, planCycle === 'yearly' && styles.cycleTextActive]}>Yearly · save 40%</Text></Pressable>
+              </View>
+              <View style={[styles.planCard, chosenPlan === 'BASIC' && styles.planCardSelected]}>
+                <View style={styles.planTitleRow}><Text style={styles.planName}>Basic</Text><Text style={styles.planPrice}>{basicPrice}</Text></View>
+                {['Daily market research', 'Nifty 50 & Sensex analysis', 'Crypto market analysis', 'Stock & sector research', 'Weekly and monthly reports', 'Ad-free reading'].map(item => <Text key={item} style={styles.planFeature}>✓  {item}</Text>)}
+                <Pressable onPress={() => choosePlan('BASIC')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Choose Basic  →</Text></Pressable>
+              </View>
+              <View style={[styles.planCard, chosenPlan === 'PRO' && styles.planCardSelected]}>
+                <View style={styles.planTitleRow}><Text style={styles.planName}>Pro</Text><Text style={styles.planPrice}>{proPrice}</Text></View>
+                {['Everything in Basic', 'In-depth research reports', 'Company and sector deep-dives', 'Global market context', 'Early access to special reports', 'Access across devices'].map(item => <Text key={item} style={styles.planFeature}>✓  {item}</Text>)}
+                <Pressable onPress={() => choosePlan('PRO')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Choose Pro  →</Text></Pressable>
+              </View>
+              <Text style={styles.disclaimer}>Prices shown are proposed display values and must match the final Google Play Console product prices before release. Subscriptions renew according to the selected Play Store plan.</Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.plansHero}>
+                <Text style={styles.premiumText}>SECURE CHECKOUT</Text>
+                <Text style={styles.plansTitle}>{chosenPlan === 'BASIC' ? 'Basic' : 'Pro'} plan</Text>
+                <Text style={styles.planPrice}>{chosenPlan === 'BASIC' ? basicPrice : proPrice}</Text>
+                <Text style={styles.muted}>Payments are handled by Google Play on Android. Your subscription is activated only after the server verifies the purchase with Google Play.</Text>
+              </View>
+              <View style={styles.paymentMethod}>
+                <Text style={styles.paymentMethodTitle}>Google Play Billing</Text>
+                <Text style={styles.muted}>UPI, cards and other supported payment methods are shown by Google Play based on your account and region.</Text>
+              </View>
+              <View style={styles.stateCard}>
+                <Text style={styles.stateTitle}>Billing setup required</Text>
+                <Text style={styles.muted}>The secure server-side purchase verification endpoint is ready. Before purchases can be enabled, the app needs registered subscription products in Play Console, the native billing client, and Google Play service-account credentials.</Text>
+              </View>
+              <Pressable onPress={() => Alert.alert('Not yet enabled', 'No payment has been taken. Configure the Google Play subscription products and native billing client before enabling checkout.')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Checkout unavailable until setup</Text></Pressable>
+              <Text style={styles.disclaimer}>No payment will be taken from this screen yet.</Text>
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
+  if (screen === 'notifications') {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <View style={styles.detailHeader}>
+          <Pressable onPress={() => setScreen('home')} style={styles.backButton}><Text style={styles.backText}>‹  Back</Text></Pressable>
+          <Text style={styles.detailBrand}>Notifications</Text>
+          <Pressable onPress={loadNotifications} style={styles.backButton}><Text style={styles.backText}>Refresh</Text></Pressable>
+        </View>
+        <ScrollView contentContainerStyle={styles.plansContent}>
+          <Text style={styles.plansTitle}>Market alerts & research</Text>
+          {notificationsLoading ? <ActivityIndicator color={COLORS.blue} size="large" /> : null}
+          {!notificationsLoading && notificationItems.length === 0 ? <View style={styles.stateCard}><Text style={styles.stateTitle}>You're all caught up</Text><Text style={styles.muted}>When new research is published, notifications will appear here and on your device when push notifications are configured.</Text></View> : null}
+          {notificationItems.map(item => (
+            <Pressable key={item.id} style={styles.notificationCard} onPress={() => {
+              const slug = item.articles?.slug
+              if (!slug) return
+              fetch(`${API_BASE}/api/articles/${encodeURIComponent(slug)}`).then(async response => {
+                const json = await response.json()
+                if (response.ok && json.data) { setSelectedArticle(json.data); setScreen('home') }
+                else if (response.status === 403) Alert.alert('Premium research', 'An active subscription is required.', [{ text: 'Cancel' }, { text: 'View plans', onPress: () => setScreen('plans') }])
+              }).catch(() => Alert.alert('Unavailable', 'Please try again later.'))
+            }}>
+              <Text style={styles.notificationTitle}>{item.title}</Text>
+              <Text style={styles.muted}>{item.message}</Text>
+              <Text style={styles.articleTime}>{readableDate(item.created_at)}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
+  if (screen === 'saved') {
+    const savedArticles = articles.filter(article => savedIds.includes(article.id))
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <View style={styles.detailHeader}>
+          <Pressable onPress={() => setScreen('home')} style={styles.backButton}><Text style={styles.backText}>‹  Back</Text></Pressable>
+          <Text style={styles.detailBrand}>Saved articles</Text>
+          <View style={{ width: 48 }} />
+        </View>
+        <ScrollView contentContainerStyle={styles.plansContent}>
+          {savedArticles.length === 0 ? <View style={styles.stateCard}><Text style={styles.stateTitle}>No saved articles yet</Text><Text style={styles.muted}>Tap the bookmark icon on any article to save it for later.</Text></View> : null}
+          {savedArticles.map(article => (
+            <Pressable key={article.id} onPress={() => openArticle(article)} style={styles.articleCard}>
+              {article.image_url ? <Image source={{ uri: article.image_url }} style={styles.articleImage} resizeMode="cover" /> : <View style={styles.articleImageFallback}><Text style={styles.fallbackGlyph}>↗</Text></View>}
+              <View style={styles.articleCopy}><Text style={styles.articleTag}>{article.categories?.name || 'Research'}</Text><Text style={styles.articleTitle}>{article.title}</Text><Text style={styles.readMore}>Read article →</Text></View>
+              <Pressable onPress={() => setSavedIds(ids => ids.filter(id => id !== article.id))}><Text style={styles.bookmark}>✕</Text></Pressable>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
@@ -339,8 +462,8 @@ export default function App() {
         <View style={styles.brandMark}><Text style={styles.brandMarkText}>↗</Text></View>
         <View style={styles.headerCopy}><Text style={styles.headerTitle}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text><Text style={styles.headerSub}>INDIA & CRYPTO RESEARCH</Text></View>
         <Pressable onPress={() => { setSearchOpen(open => !open); setSearch('') }} style={styles.headerIcon}><Text style={styles.headerIconText}>⌕</Text></Pressable>
-        <Pressable onPress={() => Alert.alert('Notifications', 'Market research notifications will be available in a later milestone.')} style={styles.headerIcon}><Text style={styles.headerIconText}>♧</Text></Pressable>
-        <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || 'member'), [{ text: 'Close' }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar}><Text style={styles.avatarText}>●</Text></Pressable>
+        <Pressable onPress={() => { setScreen('notifications'); void loadNotifications() }} style={styles.headerIcon}><Text style={styles.headerIconText}>♧</Text></Pressable>
+        <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || 'member'), [{ text: 'Close' }, { text: 'Saved articles', onPress: () => setScreen('saved') }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar}><Text style={styles.avatarText}>●</Text></Pressable>
       </View>
       {searchOpen ? <View style={styles.searchRow}><TextInput autoFocus value={search} onChangeText={setSearch} placeholder="Search research…" placeholderTextColor={COLORS.muted} style={styles.searchInput} /></View> : null}
       <ScrollView
@@ -352,7 +475,7 @@ export default function App() {
           <View style={styles.marketTile}><Text style={styles.marketEmoji}>🇮🇳</Text><View><Text style={styles.marketName}>INDIA</Text><Text style={styles.marketValue}>Market research</Text></View><Text style={styles.marketArrow}>↗</Text></View>
           <View style={styles.marketTile}><Text style={styles.marketEmoji}>₿</Text><View><Text style={styles.marketName}>CRYPTO</Text><Text style={styles.marketValue}>Digital assets</Text></View><Text style={styles.marketArrow}>↗</Text></View>
         </View>
-        <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>YOUR DAILY BRIEFING</Text><Text style={styles.sectionTitle}>Market Insight</Text></View><View style={styles.premiumPill}><Text style={styles.premiumText}>♛ Premium</Text></View></View>
+        <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>YOUR DAILY BRIEFING</Text><Text style={styles.sectionTitle}>Market Insight</Text></View><Pressable onPress={() => setScreen('plans')} style={styles.premiumPill}><Text style={styles.premiumText}>{activeSubscription ? '♛ Premium Active' : '♛ Premium'}</Text></Pressable></View>
         {articles.length > 0 ? (
           <Pressable onPress={() => openArticle(articles[0])} style={styles.heroCard}>
             {articles[0].image_url ? <Image source={{ uri: articles[0].image_url }} style={styles.heroImage} resizeMode="cover" /> : <View style={styles.heroImageFallback}><Text style={styles.heroChart}>↗  INDIA  ·  CRYPTO</Text></View>}
@@ -386,7 +509,7 @@ export default function App() {
         <Text style={styles.disclaimer}>BazaarNexa provides research and educational information only. Nothing here is a recommendation to buy or sell securities or crypto assets.</Text>
       </ScrollView>
       <View style={styles.bottomNav}>
-        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setTab(item); setFilter(item === 'Crypto' ? 'Crypto' : item === 'Home' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{['⌂', '₿', '▥', '↗'][index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
+        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' ? 'Crypto' : item === 'Home' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{['⌂', '₿', '▥', '↗'][index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
       </View>
     </SafeAreaView>
   )
