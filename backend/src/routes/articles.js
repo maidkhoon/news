@@ -34,14 +34,16 @@ router.get("/", async (req, res) => {
   const from = (page - 1) * limit;
   const to = from + limit - 1;
 
+  const categoryFilter = req.query.category ? String(req.query.category) : "";
+  const categoryRelation = categoryFilter ? "categories!inner(name,slug)" : "categories(name,slug)";
   let query = supabase
     .from("articles")
-    .select("id,title,slug,image_url,access_type,status,published_at,category_id,categories(name,slug)", { count: "exact" })
+    .select(`id,title,slug,image_url,access_type,status,published_at,category_id,${categoryRelation}`, { count: "exact" })
     .eq("status", "PUBLISHED")
     .order("published_at", { ascending: false })
     .range(from, to);
 
-  if (req.query.category) query = query.eq("categories.slug", String(req.query.category));
+  if (categoryFilter) query = query.eq("categories.slug", categoryFilter);
   if (req.query.search) query = query.ilike("title", `%${String(req.query.search).replace(/[%_]/g, "")}%`);
 
   const { data, error, count } = await query;
