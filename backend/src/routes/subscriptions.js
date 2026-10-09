@@ -59,18 +59,19 @@ router.get("/me", async (req, res) => {
 // This endpoint trusts only Google Play Developer API verification, never a client-supplied
 // expiry date or "paid" flag. Configure the package/product IDs and service account in Render.
 router.post("/verify-google-play", async (req, res) => {
-  const { productId, purchaseToken, planType } = req.body || {};
+  const { productId, purchaseToken } = req.body || {};
   if (typeof productId !== "string" || typeof purchaseToken !== "string" || !purchaseToken.trim()) {
     return res.status(400).json({ error: "productId and purchaseToken are required" });
   }
   const packageName = process.env.GOOGLE_PLAY_PACKAGE_NAME;
   const credentialsJson = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON;
-  const allowedProducts = [
-    process.env.GOOGLE_PLAY_BASIC_MONTHLY_PRODUCT_ID,
-    process.env.GOOGLE_PLAY_BASIC_YEARLY_PRODUCT_ID,
-    process.env.GOOGLE_PLAY_PRO_MONTHLY_PRODUCT_ID,
-    process.env.GOOGLE_PLAY_PRO_YEARLY_PRODUCT_ID
-  ].filter(Boolean);
+  const productPlans = new Map([
+    [process.env.GOOGLE_PLAY_BASIC_MONTHLY_PRODUCT_ID, "BASIC_MONTHLY"],
+    [process.env.GOOGLE_PLAY_BASIC_YEARLY_PRODUCT_ID, "BASIC_YEARLY"],
+    [process.env.GOOGLE_PLAY_PRO_MONTHLY_PRODUCT_ID, "PRO_MONTHLY"],
+    [process.env.GOOGLE_PLAY_PRO_YEARLY_PRODUCT_ID, "PRO_YEARLY"]
+  ].filter(([id]) => typeof id === "string" && id.length > 0));
+  const allowedProducts = [...productPlans.keys()];
 
   if (!packageName || !credentialsJson || !allowedProducts.length) {
     return res.status(503).json({
@@ -131,7 +132,7 @@ router.post("/verify-google-play", async (req, res) => {
     const autoRenewing = Boolean(lineItem.autoRenewingPlan?.autoRenewEnabled);
     const { data, error } = await supabase.from("subscriptions").upsert({
       user_id: req.authUser.id,
-      plan_type: typeof planType === "string" ? planType.slice(0, 40) : productId,
+      plan_type: productPlans.get(productId),
       product_id: productId,
       purchase_token: purchaseToken,
       provider: "google_play",
