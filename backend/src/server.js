@@ -2,9 +2,9 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
-import { supabase } from "./lib/supabase.js";
 import articleRoutes from "./routes/articles.js";
 import categoryRoutes from "./routes/categories.js";
+import adminRoutes from "./routes/admin.js";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -28,6 +28,7 @@ app.get("/api", (_req, res) => {
 
 app.use("/api/articles", articleRoutes);
 app.use("/api/categories", categoryRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: "Route not found" });
