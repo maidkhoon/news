@@ -16,12 +16,23 @@ async function requireUser(req, res, next) {
 }
 
 async function ensureProfile(user) {
-  const { error } = await supabase.from("profiles").upsert({
+  const { data: profile, error: lookupError } = await supabase.from("profiles")
+    .select("id").eq("id", user.id).maybeSingle();
+  if (lookupError) throw lookupError;
+  if (profile) {
+    const { error } = await supabase.from("profiles").update({
+      phone: user.phone || null,
+      email: user.email || null,
+      updated_at: new Date().toISOString()
+    }).eq("id", user.id);
+    if (error) throw error;
+    return;
+  }
+  const { error } = await supabase.from("profiles").insert({
     id: user.id,
     phone: user.phone || null,
-    email: user.email || null,
-    updated_at: new Date().toISOString()
-  }, { onConflict: "id" });
+    email: user.email || null
+  });
   if (error) throw error;
 }
 
