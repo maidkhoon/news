@@ -94,7 +94,7 @@ router.post("/verify-google-play", async (req, res) => {
       token: purchaseToken
     });
 
-    const activeStates = new Set(["SUBSCRIPTION_STATE_ACTIVE", "SUBSCRIPTION_STATE_IN_GRACE_PERIOD"]);
+    const activeStates = new Set(["SUBSCRIPTION_STATE_ACTIVE", "SUBSCRIPTION_STATE_IN_GRACE_PERIOD", "SUBSCRIPTION_STATE_CANCELED"]);
     if (!activeStates.has(purchase.subscriptionState || "")) {
       return res.status(402).json({ error: "SUBSCRIPTION_NOT_ACTIVE", state: purchase.subscriptionState || "UNKNOWN" });
     }
@@ -106,6 +106,15 @@ router.post("/verify-google-play", async (req, res) => {
     const expiry = new Date(lineItem.expiryTime);
     if (Number.isNaN(expiry.getTime()) || expiry <= new Date()) {
       return res.status(402).json({ error: "SUBSCRIPTION_EXPIRED" });
+    }
+
+    const { data: existingPurchase, error: existingPurchaseError } = await supabase.from("subscriptions")
+      .select("user_id")
+      .eq("purchase_token", purchaseToken)
+      .maybeSingle();
+    if (existingPurchaseError) throw existingPurchaseError;
+    if (existingPurchase && existingPurchase.user_id !== req.authUser.id) {
+      return res.status(409).json({ error: "PURCHASE_ALREADY_LINKED", message: "This Google Play purchase is already linked to another account." });
     }
 
     await ensureProfile(req.authUser);
