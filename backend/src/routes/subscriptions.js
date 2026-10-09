@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { GoogleAuth } from "google-auth-library";
 import { google } from "googleapis";
 import { supabase } from "../lib/supabase.js";
 
@@ -85,7 +84,7 @@ router.post("/verify-google-play", async (req, res) => {
 
   try {
     const credentials = JSON.parse(credentialsJson);
-    const auth = new GoogleAuth({
+    const auth = new google.auth.GoogleAuth({
       credentials,
       scopes: ["https://www.googleapis.com/auth/androidpublisher"]
     });
