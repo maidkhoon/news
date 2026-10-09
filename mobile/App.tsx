@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Constants from 'expo-constants'
 import * as Device from 'expo-device'
 import * as Notifications from 'expo-notifications'
+import { useIAP } from 'expo-iap'
 import {
   ActivityIndicator,
   Alert,
@@ -40,6 +41,12 @@ type NewsNotification = { id: string; title: string; message: string; article_id
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
 
 const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
+const PLAY_PRODUCTS = {
+  BASIC_MONTHLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_BASIC_MONTHLY_PRODUCT_ID || '',
+  BASIC_YEARLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_BASIC_YEARLY_PRODUCT_ID || '',
+  PRO_MONTHLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_PRO_MONTHLY_PRODUCT_ID || '',
+  PRO_YEARLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_PRO_YEARLY_PRODUCT_ID || '',
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -89,6 +96,7 @@ export default function App() {
   const [activeSubscription, setActiveSubscription] = useState<Subscription | null>(null)
   const [planCycle, setPlanCycle] = useState<'monthly' | 'yearly'>('monthly')
   const [chosenPlan, setChosenPlan] = useState<'BASIC' | 'PRO'>('BASIC')
+  const finishTransactionRef = useRef<((args: any) => Promise<any>) | null>(null)
 
   useEffect(() => {
     AsyncStorage.getItem(SAVED_STORAGE_KEY).then(value => {
@@ -229,6 +237,82 @@ export default function App() {
       console.warn('Push registration failed:', error instanceof Error ? error.message : error)
     }
   }, [])
+
+  const iap = useIAP({
+    onPurchaseSuccess: async (purchase: any) => {
+      const productId = purchase.productId || purchase.id
+      const purchaseToken = purchase.purchaseToken
+      if (!session?.access_token || typeof productId !== 'string' || typeof purchaseToken !== 'string') {
+        Alert.alert('Purchase pending', 'We could not read the purchase details. Please use Restore Purchases or contact support before trying again.')
+        return
+      }
+      try {
+        const response = await fetch(`${API_BASE}/api/subscriptions/verify-google-play`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ productId, purchaseToken, planType: `${chosenPlan}_${planCycle.toUpperCase()}` }),
+        })
+        const json = await response.json()
+        if (!response.ok) throw new Error(json.message || json.error || 'Google Play could not verify this purchase.')
+        await finishTransactionRef.current?.({ purchase, isConsumable: false })
+        setActiveSubscription(json.data || null)
+        setScreen('home')
+        Alert.alert('Subscription activated', 'Your BazaarNexa premium access is now active.')
+        void loadMemberData(session.access_token)
+      } catch (error) {
+        Alert.alert('Purchase verification failed', error instanceof Error ? error.message : 'Please contact support. Do not purchase again until this transaction is resolved.')
+      }
+    },
+    onPurchaseError: (error: any) => {
+      if (error?.code === 'UserCancelled' || error?.code === 'user-cancelled') return
+      Alert.alert('Google Play purchase failed', error?.message || 'Please try again later.')
+    },
+    onError: (error: Error) => console.warn('Billing error:', error.message),
+  })
+  const { connected: billingConnected, subscriptions: billingProducts, fetchProducts, requestPurchase, finishTransaction } = iap
+
+  useEffect(() => {
+    finishTransactionRef.current = finishTransaction as any
+  }, [finishTransaction])
+
+  useEffect(() => {
+    if (!billingConnected) return
+    const skus = Object.values(PLAY_PRODUCTS).filter(Boolean)
+    if (skus.length) void fetchProducts({ skus, type: 'subs' })
+  }, [billingConnected, fetchProducts])
+
+  const buySelectedPlan = async () => {
+    const productKey = `${chosenPlan}_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
+    const productId = PLAY_PRODUCTS[productKey]
+    if (!productId) {
+      Alert.alert('Plan not configured', 'The matching Google Play product ID has not been configured in the mobile environment.')
+      return
+    }
+    if (!billingConnected) {
+      Alert.alert('Billing unavailable', 'Google Play Billing is not connected. Install the Android development build and try again.')
+      return
+    }
+    const product = billingProducts.find(item => item.id === productId)
+    if (!product) {
+      Alert.alert('Plan unavailable', 'Google Play has not returned this subscription product. Check the product ID and Play Console setup.')
+      return
+    }
+    const offers = product.subscriptionOfferDetailsAndroid || []
+    try {
+      await requestPurchase({
+        request: {
+          apple: { sku: productId },
+          google: {
+            skus: [productId],
+            ...(offers.length ? { subscriptionOffers: offers.map(offer => ({ sku: productId, offerToken: offer.offerToken })) } : {}),
+          },
+        },
+        type: 'subs',
+      })
+    } catch (error) {
+      Alert.alert('Unable to start checkout', error instanceof Error ? error.message : 'Please try again later.')
+    }
+  }
 
   useEffect(() => {
     if (session) {
