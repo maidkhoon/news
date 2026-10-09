@@ -270,7 +270,7 @@ export default function App() {
     },
     onError: (error: Error) => console.warn('Billing error:', error.message),
   })
-  const { connected: billingConnected, subscriptions: billingProducts, fetchProducts, requestPurchase, finishTransaction } = iap
+  const { connected: billingConnected, subscriptions: billingProducts, fetchProducts, requestPurchase, finishTransaction, getAvailablePurchases } = iap
 
   useEffect(() => {
     finishTransactionRef.current = finishTransaction as any
@@ -312,6 +312,43 @@ export default function App() {
       })
     } catch (error) {
       Alert.alert('Unable to start checkout', error instanceof Error ? error.message : 'Please try again later.')
+    }
+  }
+
+  const restorePurchases = async () => {
+    if (!session?.access_token) return
+    try {
+      const purchases = await getAvailablePurchases()
+      if (!purchases.length) {
+        Alert.alert('No purchases found', 'Google Play did not return any restorable subscriptions for this account.')
+        return
+      }
+      let restored = false
+      for (const purchase of purchases as any[]) {
+        const productId = purchase.productId || purchase.id
+        const purchaseToken = purchase.purchaseToken
+        if (typeof productId !== 'string' || typeof purchaseToken !== 'string') continue
+        const response = await fetch(`${API_BASE}/api/subscriptions/verify-google-play`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ productId, purchaseToken, planType: productId }),
+        })
+        const json = await response.json()
+        if (response.ok && json.data) {
+          await finishTransactionRef.current?.({ purchase, isConsumable: false })
+          setActiveSubscription(json.data)
+          restored = true
+        }
+      }
+      if (restored) {
+        setScreen('home')
+        Alert.alert('Subscription restored', 'Your verified BazaarNexa subscription is active.')
+        void loadMemberData(session.access_token)
+      } else {
+        Alert.alert('Could not restore subscription', 'No active eligible Google Play subscription was verified for this account.')
+      }
+    } catch (error) {
+      Alert.alert('Restore failed', error instanceof Error ? error.message : 'Please try again later.')
     }
   }
 
@@ -511,6 +548,7 @@ export default function App() {
                     <Text style={styles.muted}>{chosenProduct?.title || chosenProductId} · {chosenProduct?.displayPrice || (chosenPlan === 'BASIC' ? basicPrice : proPrice)}</Text>
                   </View>
                   <Pressable onPress={buySelectedPlan} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Continue with Google Play  →</Text></Pressable>
+                  <Pressable onPress={restorePurchases} style={styles.textButton}><Text style={styles.linkText}>Restore purchases</Text></Pressable>
                   <Text style={styles.disclaimer}>Your purchase will be verified by the BazaarNexa server before premium access is activated.</Text>
                 </>
               ) : (
@@ -520,6 +558,7 @@ export default function App() {
                     <Text style={styles.muted}>To enable checkout, configure the selected product ID in mobile/.env, create that subscription in Play Console, install an Android development build, and configure Google Play service-account credentials in Render.</Text>
                   </View>
                   <Pressable disabled style={[styles.primaryButton, styles.disabled]}><Text style={styles.primaryButtonText}>Checkout not configured</Text></Pressable>
+                  <Pressable onPress={restorePurchases} style={styles.textButton}><Text style={styles.linkText}>Restore purchases</Text></Pressable>
                   <Text style={styles.disclaimer}>No payment will be taken until Google Play returns the configured product.</Text>
                 </>
               )}
