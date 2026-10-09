@@ -17,7 +17,7 @@ router.use(requireUser);
 
 router.post("/register", async (req, res) => {
   const { token, platform } = req.body || {};
-  if (typeof token !== "string" || !/^Expo(PushToken|PushToken\[)[^\s]+/.test(token)) {
+  if (typeof token !== "string" || !/^(Expo|Exponent)PushToken\[[^\]]+\]$/.test(token)) {
     return res.status(400).json({ error: "A valid Expo push token is required" });
   }
   if (!["android", "ios"].includes(platform)) {
