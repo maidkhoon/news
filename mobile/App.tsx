@@ -90,6 +90,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
   const [savedIds, setSavedIds] = useState<string[]>([])
+  const [savedLoaded, setSavedLoaded] = useState(false)
   const [screen, setScreen] = useState<AppScreen>('home')
   const [notificationItems, setNotificationItems] = useState<NewsNotification[]>([])
   const [notificationsLoading, setNotificationsLoading] = useState(false)
@@ -104,7 +105,7 @@ export default function App() {
         const parsed = JSON.parse(value)
         if (Array.isArray(parsed)) setSavedIds(parsed.filter(id => typeof id === 'string'))
       }
-    }).catch(() => undefined)
+    }).catch(() => undefined).finally(() => setSavedLoaded(true))
 
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
@@ -342,8 +343,9 @@ export default function App() {
   }, [session?.access_token])
 
   useEffect(() => {
+    if (!savedLoaded) return
     AsyncStorage.setItem(SAVED_STORAGE_KEY, JSON.stringify(savedIds)).catch(() => undefined)
-  }, [savedIds])
+  }, [savedIds, savedLoaded])
 
   const openArticle = async (article: Article) => {
     setSelectedArticle(article)
@@ -351,7 +353,8 @@ export default function App() {
       const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(article.slug)}`, { headers: { Authorization: `Bearer ${session.access_token}` } })
       const json = await response.json()
       if (response.status === 403 || json.error === 'PREMIUM_REQUIRED') {
-        Alert.alert('Premium research', 'An active BazaarNexa subscription is required to read this report.', [{ text: 'Not now' }, { text: 'View plans', onPress: () => setScreen('plans') }])
+        setSelectedArticle(null)
+        Alert.alert('Premium research', 'An active BazaarNexa subscription is required to read this report.', [{ text: 'Not now' }, { text: 'View plans', onPress: () => { setSelectedArticle(null); setScreen('plans') } }])
         return
       }
       if (response.ok && json.data) setSelectedArticle(json.data)
