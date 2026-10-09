@@ -443,8 +443,14 @@ export default function App() {
   }
 
   if (screen === 'plans' || screen === 'payment') {
-    const basicPrice = planCycle === 'monthly' ? '₹499 / month' : '₹3,599 / year'
-    const proPrice = planCycle === 'monthly' ? '₹999 / month' : '₹7,199 / year'
+    const basicKey = `BASIC_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
+    const proKey = `PRO_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
+    const basicPrice = billingProducts.find(item => item.id === PLAY_PRODUCTS[basicKey])?.displayPrice || (planCycle === 'monthly' ? '₹499 / month' : '₹3,599 / year')
+    const proPrice = billingProducts.find(item => item.id === PLAY_PRODUCTS[proKey])?.displayPrice || (planCycle === 'monthly' ? '₹999 / month' : '₹7,199 / year')
+    const chosenProductKey = `${chosenPlan}_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
+    const chosenProductId = PLAY_PRODUCTS[chosenProductKey]
+    const chosenProduct = billingProducts.find(item => item.id === chosenProductId)
+    const checkoutReady = Boolean(billingConnected && chosenProductId && chosenProduct)
     return (
       <SafeAreaView style={styles.screen}>
         <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
@@ -495,12 +501,25 @@ export default function App() {
                 <Text style={styles.paymentMethodTitle}>Google Play Billing</Text>
                 <Text style={styles.muted}>UPI, cards and other supported payment methods are shown by Google Play based on your account and region.</Text>
               </View>
-              <View style={styles.stateCard}>
-                <Text style={styles.stateTitle}>Billing setup required</Text>
-                <Text style={styles.muted}>The secure server-side purchase verification endpoint is ready. Before purchases can be enabled, the app needs registered subscription products in Play Console, the native billing client, and Google Play service-account credentials.</Text>
-              </View>
-              <Pressable onPress={() => Alert.alert('Not yet enabled', 'No payment has been taken. Configure the Google Play subscription products and native billing client before enabling checkout.')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Checkout unavailable until setup</Text></Pressable>
-              <Text style={styles.disclaimer}>No payment will be taken from this screen yet.</Text>
+              {checkoutReady ? (
+                <>
+                  <View style={styles.activePlanCard}>
+                    <Text style={styles.activePlanTitle}>Google Play product available</Text>
+                    <Text style={styles.muted}>{chosenProduct?.title || chosenProductId} · {chosenProduct?.displayPrice || (chosenPlan === 'BASIC' ? basicPrice : proPrice)}</Text>
+                  </View>
+                  <Pressable onPress={buySelectedPlan} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Continue with Google Play  →</Text></Pressable>
+                  <Text style={styles.disclaimer}>Your purchase will be verified by the BazaarNexa server before premium access is activated.</Text>
+                </>
+              ) : (
+                <>
+                  <View style={styles.stateCard}>
+                    <Text style={styles.stateTitle}>Google Play setup incomplete</Text>
+                    <Text style={styles.muted}>To enable checkout, configure the selected product ID in mobile/.env, create that subscription in Play Console, install an Android development build, and configure Google Play service-account credentials in Render.</Text>
+                  </View>
+                  <Pressable disabled style={[styles.primaryButton, styles.disabled]}><Text style={styles.primaryButtonText}>Checkout not configured</Text></Pressable>
+                  <Text style={styles.disclaimer}>No payment will be taken until Google Play returns the configured product.</Text>
+                </>
+              )}
             </>
           )}
         </ScrollView>
