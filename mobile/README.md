@@ -9,7 +9,7 @@ Android-first customer app for INDIA and CRYPTO market research.
 - Published article feed, featured story, search and category filters
 - Article detail screen with server-enforced premium access checks
 - Persistent saved articles/bookmarks
-- Subscription plan selection screens and active subscription status
+- Subscription plan selection, native Google Play Billing purchase flow, server verification and restore-purchase workflow
 - Notification inbox and Expo push registration workflow
 - Deep-link handling from push notification payloads
 - Pull-to-refresh, loading, empty and error states
@@ -47,11 +47,12 @@ Remote notifications require an EAS project and a development/production build; 
 
 ## Google Play subscriptions
 
-The app includes plan and checkout screens. Actual purchase checkout must be enabled only after:
+The native Google Play Billing flow, purchase restoration and server-side verification request are implemented. Live purchase checkout will work only after:
 - Create Basic/Pro monthly and yearly subscriptions in Google Play Console.
 - Set the four matching product IDs in the backend Render environment.
 - Set `GOOGLE_PLAY_PACKAGE_NAME` and `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` in Render, using a service account authorized for Play Developer API access.
-- Integrate and validate the native Google Play Billing purchase client in an Android development build before production release.
+- Configure the four matching `EXPO_PUBLIC_GOOGLE_PLAY_*_PRODUCT_ID` values in the mobile build environment.
+- Build and test with an Android development client. Google Play test purchases must be made by licensed tester accounts from a Play testing track.
 
 The backend verification endpoint never trusts a client-supplied price or expiry; it checks purchase tokens with Google Play. Until the native billing client and Play Console products are configured, the app clearly reports that checkout is not enabled.
 
