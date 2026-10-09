@@ -299,6 +299,10 @@ export default function App() {
       return
     }
     const offers = product.subscriptionOfferDetailsAndroid || []
+    if (!offers.length) {
+      Alert.alert('Plan unavailable', 'Google Play did not return a subscription offer for this product. Check its base plan and offer configuration in Play Console.')
+      return
+    }
     try {
       await requestPurchase({
         request: {
@@ -405,7 +409,7 @@ export default function App() {
     const chosen = tab === 'Crypto' ? 'Crypto' : tab === 'Sensex' || tab === 'Nifty 50' ? tab : filter
     if (chosen === 'Crypto') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('crypto') || a.categories?.name?.toLowerCase().includes('crypto'))
     else if (chosen === 'India') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('india') || a.categories?.name?.toLowerCase().includes('india'))
-    else if (chosen === 'Sensex' || chosen === 'Nifty 50') result = result.filter(a => a.title.toLowerCase().includes(chosen.toLowerCase()) || a.categories?.name?.toLowerCase().includes('india'))
+    else if (chosen === 'Sensex' || chosen === 'Nifty 50') result = result.filter(a => a.title.toLowerCase().includes(chosen.toLowerCase()) || a.slug.toLowerCase().includes(chosen.toLowerCase()))
     if (search.trim()) result = result.filter(a => a.title.toLowerCase().includes(search.trim().toLowerCase()))
     return result
   }, [articles, filter, tab, search])
