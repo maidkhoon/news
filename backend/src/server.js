@@ -5,6 +5,10 @@ import helmet from "helmet";
 import articleRoutes from "./routes/articles.js";
 import categoryRoutes from "./routes/categories.js";
 import adminRoutes from "./routes/admin.js";
+import userRoutes from "./routes/users.js";
+import deviceRoutes from "./routes/devices.js";
+import notificationRoutes from "./routes/notifications.js";
+import subscriptionRoutes from "./routes/subscriptions.js";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -23,11 +27,15 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.get("/api", (_req, res) => {
-  res.json({ name: "News App API", version: "0.1.0" });
+  res.json({ name: "BazaarNexa API", version: "0.2.0" });
 });
 
 app.use("/api/articles", articleRoutes);
 app.use("/api/categories", categoryRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/devices", deviceRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/admin", adminRoutes);
 
 app.use((_req, res) => {

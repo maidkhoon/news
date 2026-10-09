@@ -1,12 +1,29 @@
 {
   "expo": {
-    "name": "News",
-    "slug": "news",
-    "version": "0.1.0",
+    "name": "BazaarNexa",
+    "slug": "bazaarnexa",
+    "version": "0.2.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "android": {
-      "package": "com.maidkhoon.news"
+      "package": "com.maidkhoon.news",
+      "permissions": [
+        "NOTIFICATIONS",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#087BFF",
+          "defaultChannel": "market-research"
+        }
+      ],
+      "expo-iap"
+    ],
+    "extra": {
+      "apiBaseUrl": "https://news-api-egmd.onrender.com"
     }
   }
 }

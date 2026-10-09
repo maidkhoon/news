@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import Constants from 'expo-constants'
+import * as Device from 'expo-device'
+import * as Notifications from 'expo-notifications'
+import { useIAP } from 'expo-iap'
 import {
   ActivityIndicator,
   Alert,
@@ -12,6 +17,7 @@ import {
   Text,
   TextInput,
   View,
+  Platform,
 } from 'react-native'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
@@ -30,6 +36,27 @@ type Article = {
   categories?: { name?: string; slug?: string } | null
 }
 type Tab = 'Home' | 'Crypto' | 'Sensex' | 'Nifty 50'
+type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved'
+type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
+type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
+
+const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
+const PLAY_PRODUCTS = {
+  BASIC_MONTHLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_BASIC_MONTHLY_PRODUCT_ID || '',
+  BASIC_YEARLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_BASIC_YEARLY_PRODUCT_ID || '',
+  PRO_MONTHLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_PRO_MONTHLY_PRODUCT_ID || '',
+  PRO_YEARLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_PRO_YEARLY_PRODUCT_ID || '',
+}
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+})
 
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://news-api-egmd.onrender.com').replace(/\/$/, '')
 const NAV_TABS: Tab[] = ['Home', 'Crypto', 'Sensex', 'Nifty 50']
@@ -63,8 +90,23 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
   const [savedIds, setSavedIds] = useState<string[]>([])
+  const [savedLoaded, setSavedLoaded] = useState(false)
+  const [screen, setScreen] = useState<AppScreen>('home')
+  const [notificationItems, setNotificationItems] = useState<NewsNotification[]>([])
+  const [notificationsLoading, setNotificationsLoading] = useState(false)
+  const [activeSubscription, setActiveSubscription] = useState<Subscription | null>(null)
+  const [planCycle, setPlanCycle] = useState<'monthly' | 'yearly'>('monthly')
+  const [chosenPlan, setChosenPlan] = useState<'BASIC' | 'PRO'>('BASIC')
+  const finishTransactionRef = useRef<((args: any) => Promise<any>) | null>(null)
 
   useEffect(() => {
+    AsyncStorage.getItem(SAVED_STORAGE_KEY).then(value => {
+      if (value) {
+        const parsed = JSON.parse(value)
+        if (Array.isArray(parsed)) setSavedIds(parsed.filter(id => typeof id === 'string'))
+      }
+    }).catch(() => undefined).finally(() => setSavedLoaded(true))
+
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setInitializing(false)
@@ -134,17 +176,226 @@ export default function App() {
     }
   }, [])
 
+  const loadMemberData = useCallback(async (accessToken: string) => {
+    const headers = { Authorization: `Bearer ${accessToken}` }
+    try {
+      await fetch(`${API_BASE}/api/users/me`, { headers })
+      const response = await fetch(`${API_BASE}/api/subscriptions/me`, { headers })
+      if (response.ok) {
+        const json = await response.json()
+        setActiveSubscription(json.data || null)
+      }
+    } catch {
+      // Free research remains available when membership APIs are offline.
+    }
+  }, [])
+
+  const loadNotifications = useCallback(async () => {
+    if (!session?.access_token) return
+    setNotificationsLoading(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/notifications`, {
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      })
+      if (response.ok) {
+        const json = await response.json()
+        setNotificationItems(Array.isArray(json.data) ? json.data : [])
+      }
+    } catch {
+      // The screen will show an empty state if notifications cannot be loaded.
+    } finally {
+      setNotificationsLoading(false)
+    }
+  }, [session?.access_token])
+
+  const registerPushDevice = useCallback(async (accessToken: string) => {
+    if (!Device.isDevice) return
+    try {
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('market-research', {
+          name: 'Market research',
+          importance: Notifications.AndroidImportance.DEFAULT,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#087BFF',
+        })
+      }
+      const current = await Notifications.getPermissionsAsync()
+      let status = current.status
+      if (status !== 'granted') status = (await Notifications.requestPermissionsAsync()).status
+      if (status !== 'granted') return
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId || (Constants as any).easConfig?.projectId
+      if (!projectId) {
+        console.warn('Set the EAS projectId to enable remote push notifications.')
+        return
+      }
+      const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data
+      await fetch(`${API_BASE}/api/devices/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ token, platform: Platform.OS === 'ios' ? 'ios' : 'android' }),
+      })
+    } catch (error) {
+      console.warn('Push registration failed:', error instanceof Error ? error.message : error)
+    }
+  }, [])
+
+  const iap = useIAP({
+    onPurchaseSuccess: async (purchase: any) => {
+      const productId = purchase.productId || purchase.id
+      const purchaseToken = purchase.purchaseToken
+      if (!session?.access_token || typeof productId !== 'string' || typeof purchaseToken !== 'string') {
+        Alert.alert('Purchase pending', 'We could not read the purchase details. Please use Restore Purchases or contact support before trying again.')
+        return
+      }
+      try {
+        const response = await fetch(`${API_BASE}/api/subscriptions/verify-google-play`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ productId, purchaseToken, planType: `${chosenPlan}_${planCycle.toUpperCase()}` }),
+        })
+        const json = await response.json()
+        if (!response.ok) throw new Error(json.message || json.error || 'Google Play could not verify this purchase.')
+        await finishTransactionRef.current?.({ purchase, isConsumable: false })
+        setActiveSubscription(json.data || null)
+        setScreen('home')
+        Alert.alert('Subscription activated', 'Your BazaarNexa premium access is now active.')
+        void loadMemberData(session.access_token)
+      } catch (error) {
+        Alert.alert('Purchase verification failed', error instanceof Error ? error.message : 'Please contact support. Do not purchase again until this transaction is resolved.')
+      }
+    },
+    onPurchaseError: (error: any) => {
+      if (error?.code === 'UserCancelled' || error?.code === 'user-cancelled') return
+      Alert.alert('Google Play purchase failed', error?.message || 'Please try again later.')
+    },
+    onError: (error: Error) => console.warn('Billing error:', error.message),
+  })
+  const { connected: billingConnected, subscriptions: billingProducts, fetchProducts, requestPurchase, finishTransaction, getAvailablePurchases } = iap
+
   useEffect(() => {
-    if (session) loadFeed()
-  }, [session, loadFeed])
+    finishTransactionRef.current = finishTransaction as any
+  }, [finishTransaction])
+
+  useEffect(() => {
+    if (!billingConnected) return
+    const skus = Object.values(PLAY_PRODUCTS).filter(Boolean)
+    if (skus.length) void fetchProducts({ skus, type: 'subs' })
+  }, [billingConnected, fetchProducts])
+
+  const buySelectedPlan = async () => {
+    const productKey = `${chosenPlan}_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
+    const productId = PLAY_PRODUCTS[productKey]
+    if (!productId) {
+      Alert.alert('Plan not configured', 'The matching Google Play product ID has not been configured in the mobile environment.')
+      return
+    }
+    if (!billingConnected) {
+      Alert.alert('Billing unavailable', 'Google Play Billing is not connected. Install the Android development build and try again.')
+      return
+    }
+    const product = billingProducts.find(item => item.id === productId)
+    if (!product) {
+      Alert.alert('Plan unavailable', 'Google Play has not returned this subscription product. Check the product ID and Play Console setup.')
+      return
+    }
+    const offers = product.subscriptionOfferDetailsAndroid || []
+    if (!offers.length) {
+      Alert.alert('Plan unavailable', 'Google Play did not return a subscription offer for this product. Check its base plan and offer configuration in Play Console.')
+      return
+    }
+    try {
+      await requestPurchase({
+        request: {
+          apple: { sku: productId },
+          google: {
+            skus: [productId],
+            ...(offers.length ? { subscriptionOffers: offers.map(offer => ({ sku: productId, offerToken: offer.offerToken })) } : {}),
+          },
+        },
+        type: 'subs',
+      })
+    } catch (error) {
+      Alert.alert('Unable to start checkout', error instanceof Error ? error.message : 'Please try again later.')
+    }
+  }
+
+  const restorePurchases = async () => {
+    if (!session?.access_token) return
+    try {
+      const purchases = await getAvailablePurchases()
+      if (!purchases.length) {
+        Alert.alert('No purchases found', 'Google Play did not return any restorable subscriptions for this account.')
+        return
+      }
+      let restored = false
+      for (const purchase of purchases as any[]) {
+        const productId = purchase.productId || purchase.id
+        const purchaseToken = purchase.purchaseToken
+        if (typeof productId !== 'string' || typeof purchaseToken !== 'string') continue
+        const response = await fetch(`${API_BASE}/api/subscriptions/verify-google-play`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ productId, purchaseToken, planType: productId }),
+        })
+        const json = await response.json()
+        if (response.ok && json.data) {
+          await finishTransactionRef.current?.({ purchase, isConsumable: false })
+          setActiveSubscription(json.data)
+          restored = true
+        }
+      }
+      if (restored) {
+        setScreen('home')
+        Alert.alert('Subscription restored', 'Your verified BazaarNexa subscription is active.')
+        void loadMemberData(session.access_token)
+      } else {
+        Alert.alert('Could not restore subscription', 'No active eligible Google Play subscription was verified for this account.')
+      }
+    } catch (error) {
+      Alert.alert('Restore failed', error instanceof Error ? error.message : 'Please try again later.')
+    }
+  }
+
+  useEffect(() => {
+    if (session) {
+      loadFeed()
+      loadMemberData(session.access_token)
+      void registerPushDevice(session.access_token)
+    } else {
+      setActiveSubscription(null)
+    }
+  }, [session, loadFeed, loadMemberData, registerPushDevice])
+
+  useEffect(() => {
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = response.notification.request.content.data
+      const slug = typeof data?.articleSlug === 'string' ? data.articleSlug : ''
+      if (!slug) return
+      setScreen('home')
+      fetch(`${API_BASE}/api/articles/${encodeURIComponent(slug)}`, { headers: { Authorization: `Bearer ${session?.access_token || ''}` } })
+        .then(async response => {
+          const json = await response.json()
+          if (response.ok && json.data) setSelectedArticle(json.data)
+          else if (response.status === 403) Alert.alert('Premium research', 'An active subscription is required to read this article.')
+        })
+        .catch(() => Alert.alert('Article unavailable', 'Please open BazaarNexa and try again.'))
+    })
+    return () => responseSubscription.remove()
+  }, [session?.access_token])
+
+  useEffect(() => {
+    if (!savedLoaded) return
+    AsyncStorage.setItem(SAVED_STORAGE_KEY, JSON.stringify(savedIds)).catch(() => undefined)
+  }, [savedIds, savedLoaded])
 
   const openArticle = async (article: Article) => {
     setSelectedArticle(article)
     try {
-      const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(article.slug)}`)
+      const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(article.slug)}`, { headers: { Authorization: `Bearer ${session.access_token}` } })
       const json = await response.json()
       if (response.status === 403 || json.error === 'PREMIUM_REQUIRED') {
-        Alert.alert('Premium research', 'This article requires an active subscription. Subscription access will be added in the next milestone.')
+        setSelectedArticle(null)
+        Alert.alert('Premium research', 'An active BazaarNexa subscription is required to read this report.', [{ text: 'Not now' }, { text: 'View plans', onPress: () => { setSelectedArticle(null); setScreen('plans') } }])
         return
       }
       if (response.ok && json.data) setSelectedArticle(json.data)
@@ -158,7 +409,7 @@ export default function App() {
     const chosen = tab === 'Crypto' ? 'Crypto' : tab === 'Sensex' || tab === 'Nifty 50' ? tab : filter
     if (chosen === 'Crypto') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('crypto') || a.categories?.name?.toLowerCase().includes('crypto'))
     else if (chosen === 'India') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('india') || a.categories?.name?.toLowerCase().includes('india'))
-    else if (chosen === 'Sensex' || chosen === 'Nifty 50') result = result.filter(a => a.title.toLowerCase().includes(chosen.toLowerCase()) || a.categories?.name?.toLowerCase().includes('india'))
+    else if (chosen === 'Sensex' || chosen === 'Nifty 50') result = result.filter(a => a.title.toLowerCase().includes(chosen.toLowerCase()) || a.slug.toLowerCase().includes(chosen.toLowerCase()))
     if (search.trim()) result = result.filter(a => a.title.toLowerCase().includes(search.trim().toLowerCase()))
     return result
   }, [articles, filter, tab, search])
@@ -168,7 +419,15 @@ export default function App() {
     setStep('phone')
     setOtp('')
     setSelectedArticle(null)
+    setScreen('home')
   }
+
+  const choosePlan = (plan: 'BASIC' | 'PRO') => {
+    setChosenPlan(plan)
+    setScreen('payment')
+  }
+
+  const formatExpiry = (value: string) => new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
   if (initializing) {
     return <SafeAreaView style={styles.loadingScreen}><StatusBar barStyle="light-content" backgroundColor={COLORS.background} /><ActivityIndicator color={COLORS.blue} size="large" /><Text style={styles.muted}>Preparing BazaarNexa…</Text></SafeAreaView>
@@ -227,6 +486,150 @@ export default function App() {
     )
   }
 
+  if (screen === 'plans' || screen === 'payment') {
+    const basicKey = `BASIC_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
+    const proKey = `PRO_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
+    const basicPrice = billingProducts.find(item => item.id === PLAY_PRODUCTS[basicKey])?.displayPrice || (planCycle === 'monthly' ? '₹499 / month' : '₹3,599 / year')
+    const proPrice = billingProducts.find(item => item.id === PLAY_PRODUCTS[proKey])?.displayPrice || (planCycle === 'monthly' ? '₹999 / month' : '₹7,199 / year')
+    const chosenProductKey = `${chosenPlan}_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
+    const chosenProductId = PLAY_PRODUCTS[chosenProductKey]
+    const chosenProduct = billingProducts.find(item => item.id === chosenProductId)
+    const checkoutReady = Boolean(billingConnected && chosenProductId && chosenProduct)
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <View style={styles.detailHeader}>
+          <Pressable onPress={() => setScreen(screen === 'payment' ? 'plans' : 'home')} style={styles.backButton}><Text style={styles.backText}>‹  Back</Text></Pressable>
+          <Text style={styles.detailBrand}>{screen === 'plans' ? 'Choose your plan' : 'Payment details'}</Text>
+          <View style={{ width: 48 }} />
+        </View>
+        <ScrollView contentContainerStyle={styles.plansContent}>
+          {screen === 'plans' ? (
+            <>
+              <View style={styles.plansHero}>
+                <Text style={styles.premiumText}>♛ BAZAARNEXA PREMIUM</Text>
+                <Text style={styles.plansTitle}>Research with more depth.</Text>
+                <Text style={styles.muted}>Unlock premium articles, detailed company and sector analysis, and market reports.</Text>
+              </View>
+              {activeSubscription ? (
+                <View style={styles.activePlanCard}>
+                  <Text style={styles.activePlanTitle}>Your subscription is active</Text>
+                  <Text style={styles.muted}>{activeSubscription.plan_type} · valid until {formatExpiry(activeSubscription.expiry_date)}</Text>
+                </View>
+              ) : null}
+              <View style={styles.cycleToggle}>
+                <Pressable onPress={() => setPlanCycle('monthly')} style={[styles.cycleButton, planCycle === 'monthly' && styles.cycleButtonActive]}><Text style={[styles.cycleText, planCycle === 'monthly' && styles.cycleTextActive]}>Monthly</Text></Pressable>
+                <Pressable onPress={() => setPlanCycle('yearly')} style={[styles.cycleButton, planCycle === 'yearly' && styles.cycleButtonActive]}><Text style={[styles.cycleText, planCycle === 'yearly' && styles.cycleTextActive]}>Yearly · save 40%</Text></Pressable>
+              </View>
+              <View style={[styles.planCard, chosenPlan === 'BASIC' && styles.planCardSelected]}>
+                <View style={styles.planTitleRow}><Text style={styles.planName}>Basic</Text><Text style={styles.planPrice}>{basicPrice}</Text></View>
+                {['Daily market research', 'Nifty 50 & Sensex analysis', 'Crypto market analysis', 'Stock & sector research', 'Weekly and monthly reports', 'Ad-free reading'].map(item => <Text key={item} style={styles.planFeature}>✓  {item}</Text>)}
+                <Pressable onPress={() => choosePlan('BASIC')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Choose Basic  →</Text></Pressable>
+              </View>
+              <View style={[styles.planCard, chosenPlan === 'PRO' && styles.planCardSelected]}>
+                <View style={styles.planTitleRow}><Text style={styles.planName}>Pro</Text><Text style={styles.planPrice}>{proPrice}</Text></View>
+                {['Everything in Basic', 'In-depth research reports', 'Company and sector deep-dives', 'Global market context', 'Early access to special reports', 'Access across devices'].map(item => <Text key={item} style={styles.planFeature}>✓  {item}</Text>)}
+                <Pressable onPress={() => choosePlan('PRO')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Choose Pro  →</Text></Pressable>
+              </View>
+              <Text style={styles.disclaimer}>Prices shown are proposed display values and must match the final Google Play Console product prices before release. Subscriptions renew according to the selected Play Store plan.</Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.plansHero}>
+                <Text style={styles.premiumText}>SECURE CHECKOUT</Text>
+                <Text style={styles.plansTitle}>{chosenPlan === 'BASIC' ? 'Basic' : 'Pro'} plan</Text>
+                <Text style={styles.planPrice}>{chosenPlan === 'BASIC' ? basicPrice : proPrice}</Text>
+                <Text style={styles.muted}>Payments are handled by Google Play on Android. Your subscription is activated only after the server verifies the purchase with Google Play.</Text>
+              </View>
+              <View style={styles.paymentMethod}>
+                <Text style={styles.paymentMethodTitle}>Google Play Billing</Text>
+                <Text style={styles.muted}>UPI, cards and other supported payment methods are shown by Google Play based on your account and region.</Text>
+              </View>
+              {checkoutReady ? (
+                <>
+                  <View style={styles.activePlanCard}>
+                    <Text style={styles.activePlanTitle}>Google Play product available</Text>
+                    <Text style={styles.muted}>{chosenProduct?.title || chosenProductId} · {chosenProduct?.displayPrice || (chosenPlan === 'BASIC' ? basicPrice : proPrice)}</Text>
+                  </View>
+                  <Pressable onPress={buySelectedPlan} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Continue with Google Play  →</Text></Pressable>
+                  <Pressable onPress={restorePurchases} style={styles.textButton}><Text style={styles.linkText}>Restore purchases</Text></Pressable>
+                  <Text style={styles.disclaimer}>Your purchase will be verified by the BazaarNexa server before premium access is activated.</Text>
+                </>
+              ) : (
+                <>
+                  <View style={styles.stateCard}>
+                    <Text style={styles.stateTitle}>Google Play setup incomplete</Text>
+                    <Text style={styles.muted}>To enable checkout, configure the selected product ID in mobile/.env, create that subscription in Play Console, install an Android development build, and configure Google Play service-account credentials in Render.</Text>
+                  </View>
+                  <Pressable disabled style={[styles.primaryButton, styles.disabled]}><Text style={styles.primaryButtonText}>Checkout not configured</Text></Pressable>
+                  <Pressable onPress={restorePurchases} style={styles.textButton}><Text style={styles.linkText}>Restore purchases</Text></Pressable>
+                  <Text style={styles.disclaimer}>No payment will be taken until Google Play returns the configured product.</Text>
+                </>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
+  if (screen === 'notifications') {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <View style={styles.detailHeader}>
+          <Pressable onPress={() => setScreen('home')} style={styles.backButton}><Text style={styles.backText}>‹  Back</Text></Pressable>
+          <Text style={styles.detailBrand}>Notifications</Text>
+          <Pressable onPress={loadNotifications} style={styles.backButton}><Text style={styles.backText}>Refresh</Text></Pressable>
+        </View>
+        <ScrollView contentContainerStyle={styles.plansContent}>
+          <Text style={styles.plansTitle}>Market alerts & research</Text>
+          {notificationsLoading ? <ActivityIndicator color={COLORS.blue} size="large" /> : null}
+          {!notificationsLoading && notificationItems.length === 0 ? <View style={styles.stateCard}><Text style={styles.stateTitle}>You're all caught up</Text><Text style={styles.muted}>When new research is published, notifications will appear here and on your device when push notifications are configured.</Text></View> : null}
+          {notificationItems.map(item => (
+            <Pressable key={item.id} style={styles.notificationCard} onPress={() => {
+              const slug = item.articles?.slug
+              if (!slug) return
+              fetch(`${API_BASE}/api/articles/${encodeURIComponent(slug)}`, { headers: { Authorization: `Bearer ${session.access_token}` } }).then(async response => {
+                const json = await response.json()
+                if (response.ok && json.data) { setSelectedArticle(json.data); setScreen('home') }
+                else if (response.status === 403) Alert.alert('Premium research', 'An active subscription is required.', [{ text: 'Cancel' }, { text: 'View plans', onPress: () => setScreen('plans') }])
+              }).catch(() => Alert.alert('Unavailable', 'Please try again later.'))
+            }}>
+              <Text style={styles.notificationTitle}>{item.title}</Text>
+              <Text style={styles.muted}>{item.message}</Text>
+              <Text style={styles.articleTime}>{readableDate(item.created_at)}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
+  if (screen === 'saved') {
+    const savedArticles = articles.filter(article => savedIds.includes(article.id))
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <View style={styles.detailHeader}>
+          <Pressable onPress={() => setScreen('home')} style={styles.backButton}><Text style={styles.backText}>‹  Back</Text></Pressable>
+          <Text style={styles.detailBrand}>Saved articles</Text>
+          <View style={{ width: 48 }} />
+        </View>
+        <ScrollView contentContainerStyle={styles.plansContent}>
+          {savedArticles.length === 0 ? <View style={styles.stateCard}><Text style={styles.stateTitle}>No saved articles yet</Text><Text style={styles.muted}>Tap the bookmark icon on any article to save it for later.</Text></View> : null}
+          {savedArticles.map(article => (
+            <Pressable key={article.id} onPress={() => openArticle(article)} style={styles.articleCard}>
+              {article.image_url ? <Image source={{ uri: article.image_url }} style={styles.articleImage} resizeMode="cover" /> : <View style={styles.articleImageFallback}><Text style={styles.fallbackGlyph}>↗</Text></View>}
+              <View style={styles.articleCopy}><Text style={styles.articleTag}>{article.categories?.name || 'Research'}</Text><Text style={styles.articleTitle}>{article.title}</Text><Text style={styles.readMore}>Read article →</Text></View>
+              <Pressable onPress={() => setSavedIds(ids => ids.filter(id => id !== article.id))}><Text style={styles.bookmark}>✕</Text></Pressable>
+            </Pressable>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
@@ -234,8 +637,8 @@ export default function App() {
         <View style={styles.brandMark}><Text style={styles.brandMarkText}>↗</Text></View>
         <View style={styles.headerCopy}><Text style={styles.headerTitle}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text><Text style={styles.headerSub}>INDIA & CRYPTO RESEARCH</Text></View>
         <Pressable onPress={() => { setSearchOpen(open => !open); setSearch('') }} style={styles.headerIcon}><Text style={styles.headerIconText}>⌕</Text></Pressable>
-        <Pressable onPress={() => Alert.alert('Notifications', 'Market research notifications will be available in a later milestone.')} style={styles.headerIcon}><Text style={styles.headerIconText}>♧</Text></Pressable>
-        <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || 'member'), [{ text: 'Close' }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar}><Text style={styles.avatarText}>●</Text></Pressable>
+        <Pressable onPress={() => { setScreen('notifications'); void loadNotifications() }} style={styles.headerIcon}><Text style={styles.headerIconText}>♧</Text></Pressable>
+        <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || 'member'), [{ text: 'Close' }, { text: 'Saved articles', onPress: () => setScreen('saved') }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar}><Text style={styles.avatarText}>●</Text></Pressable>
       </View>
       {searchOpen ? <View style={styles.searchRow}><TextInput autoFocus value={search} onChangeText={setSearch} placeholder="Search research…" placeholderTextColor={COLORS.muted} style={styles.searchInput} /></View> : null}
       <ScrollView
@@ -247,7 +650,7 @@ export default function App() {
           <View style={styles.marketTile}><Text style={styles.marketEmoji}>🇮🇳</Text><View><Text style={styles.marketName}>INDIA</Text><Text style={styles.marketValue}>Market research</Text></View><Text style={styles.marketArrow}>↗</Text></View>
           <View style={styles.marketTile}><Text style={styles.marketEmoji}>₿</Text><View><Text style={styles.marketName}>CRYPTO</Text><Text style={styles.marketValue}>Digital assets</Text></View><Text style={styles.marketArrow}>↗</Text></View>
         </View>
-        <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>YOUR DAILY BRIEFING</Text><Text style={styles.sectionTitle}>Market Insight</Text></View><View style={styles.premiumPill}><Text style={styles.premiumText}>♛ Premium</Text></View></View>
+        <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>YOUR DAILY BRIEFING</Text><Text style={styles.sectionTitle}>Market Insight</Text></View><Pressable onPress={() => setScreen('plans')} style={styles.premiumPill}><Text style={styles.premiumText}>{activeSubscription ? '♛ Premium Active' : '♛ Premium'}</Text></Pressable></View>
         {articles.length > 0 ? (
           <Pressable onPress={() => openArticle(articles[0])} style={styles.heroCard}>
             {articles[0].image_url ? <Image source={{ uri: articles[0].image_url }} style={styles.heroImage} resizeMode="cover" /> : <View style={styles.heroImageFallback}><Text style={styles.heroChart}>↗  INDIA  ·  CRYPTO</Text></View>}
@@ -281,7 +684,7 @@ export default function App() {
         <Text style={styles.disclaimer}>BazaarNexa provides research and educational information only. Nothing here is a recommendation to buy or sell securities or crypto assets.</Text>
       </ScrollView>
       <View style={styles.bottomNav}>
-        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setTab(item); setFilter(item === 'Crypto' ? 'Crypto' : item === 'Home' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{['⌂', '₿', '▥', '↗'][index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
+        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' ? 'Crypto' : item === 'Home' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{['⌂', '₿', '▥', '↗'][index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
       </View>
     </SafeAreaView>
   )
@@ -400,6 +803,26 @@ const styles = StyleSheet.create({
   backText: { color: COLORS.blueLight, fontSize: 15, fontWeight: '700' },
   detailBrand: { color: COLORS.text, fontWeight: '800', fontSize: 16 },
   detailContent: { padding: 18, paddingBottom: 35 },
+  plansContent: { padding: 18, paddingBottom: 38 },
+  plansHero: { backgroundColor: '#0C2B4C', borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 20, marginBottom: 17, gap: 10 },
+  plansTitle: { color: COLORS.text, fontSize: 25, fontWeight: '900', lineHeight: 31, marginBottom: 7 },
+  activePlanCard: { backgroundColor: '#103A30', borderWidth: 1, borderColor: '#1E8C6A', borderRadius: 14, padding: 15, marginBottom: 16, gap: 5 },
+  activePlanTitle: { color: '#7DF0C2', fontSize: 15, fontWeight: '800' },
+  cycleToggle: { flexDirection: 'row', backgroundColor: COLORS.surface, borderRadius: 13, padding: 4, marginBottom: 15, borderWidth: 1, borderColor: COLORS.border },
+  cycleButton: { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 10 },
+  cycleButtonActive: { backgroundColor: COLORS.blue },
+  cycleText: { color: COLORS.muted, fontSize: 12, fontWeight: '800' },
+  cycleTextActive: { color: '#FFFFFF' },
+  planCard: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 18, padding: 17, marginBottom: 14 },
+  planCardSelected: { borderColor: '#E8BE50', borderWidth: 2 },
+  planTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 7, marginBottom: 14 },
+  planName: { color: COLORS.text, fontSize: 20, fontWeight: '900' },
+  planPrice: { color: '#FFD56A', fontSize: 17, fontWeight: '900' },
+  planFeature: { color: '#C8D8E9', fontSize: 13, lineHeight: 22, marginBottom: 5 },
+  paymentMethod: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 15, padding: 17, marginVertical: 15, gap: 8 },
+  paymentMethodTitle: { color: COLORS.text, fontSize: 16, fontWeight: '800' },
+  notificationCard: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, padding: 15, marginBottom: 11, gap: 7 },
+  notificationTitle: { color: COLORS.text, fontSize: 15, fontWeight: '800', lineHeight: 21 },
   detailImage: { width: '100%', height: 220, borderRadius: 15, marginBottom: 18, backgroundColor: COLORS.surface },
   categoryLabel: { color: COLORS.blueLight, fontSize: 11, fontWeight: '900', letterSpacing: 1, marginBottom: 9 },
   detailTitle: { color: COLORS.text, fontSize: 27, fontWeight: '900', lineHeight: 34, marginBottom: 12 },

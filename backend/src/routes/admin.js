@@ -1,12 +1,23 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import { requireAdmin } from "../middleware/require-admin.js";
+import { sendArticlePush } from "../lib/push.js";
 
 const router = Router();
 
 router.use(requireAdmin);
 
 const articleFields = "id,title,slug,image_url,content,access_type,status,published_at,category_id,created_by,created_at,updated_at,categories(name,slug)";
+
+async function notifyPublished(article) {
+  const categoryName = article.categories?.name || "Market Research";
+  await supabase.from("notifications").insert({
+    title: article.title,
+    message: `New ${categoryName} research is available.`,
+    article_id: article.id
+  });
+  await sendArticlePush({ ...article, category_name: categoryName });
+}
 
 function makeSlug(value) {
   return String(value || "")
@@ -100,6 +111,8 @@ router.post("/articles", async (req, res) => {
     return res.status(500).json({ error: "Unable to create article" });
   }
 
+  if (status === "PUBLISHED") await notifyPublished(data);
+
   return res.status(201).json({ data });
 });
 
@@ -143,6 +156,7 @@ router.patch("/articles/:id", async (req, res) => {
   }
 
   if (!data) return res.status(404).json({ error: "Article not found" });
+  if (body.status === "PUBLISHED") await notifyPublished(data);
   return res.json({ data });
 });
 

@@ -1,6 +1,6 @@
 {
-  "name": "news-mobile",
-  "version": "0.1.0",
+  "name": "bazaarnexa-mobile",
+  "version": "0.2.0",
   "private": true,
   "main": "expo/AppEntry.js",
   "scripts": {
@@ -14,9 +14,13 @@
     "@react-native-async-storage/async-storage": "~2.2.0",
     "@supabase/supabase-js": "^2.78.0",
     "expo": "~57.0.0",
+    "expo-constants": "~57.0.17",
+    "expo-device": "~57.0.1",
+    "expo-notifications": "~57.0.16",
     "react": "19.2.3",
-    "react-native": "0.86.0",
-    "react-native-url-polyfill": "^2.0.0"
+    "react-native": "0.86.3",
+    "react-native-url-polyfill": "^2.0.0",
+    "expo-iap": "^4.0.0"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",

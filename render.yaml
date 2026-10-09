@@ -16,3 +16,15 @@ services:
         sync: false
       - key: CORS_ORIGIN
         value: "*"
+      - key: GOOGLE_PLAY_PACKAGE_NAME
+        sync: false
+      - key: GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GOOGLE_PLAY_BASIC_MONTHLY_PRODUCT_ID
+        sync: false
+      - key: GOOGLE_PLAY_BASIC_YEARLY_PRODUCT_ID
+        sync: false
+      - key: GOOGLE_PLAY_PRO_MONTHLY_PRODUCT_ID
+        sync: false
+      - key: GOOGLE_PLAY_PRO_YEARLY_PRODUCT_ID
+        sync: false
