@@ -19,7 +19,8 @@
     "expo-notifications": "~0.33.0",
     "react": "19.2.3",
     "react-native": "0.86.0",
-    "react-native-url-polyfill": "^2.0.0"
+    "react-native-url-polyfill": "^2.0.0",
+    "expo-iap": "^4.0.0"
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
