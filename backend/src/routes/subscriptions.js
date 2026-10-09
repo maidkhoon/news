@@ -108,6 +108,15 @@ router.post("/verify-google-play", async (req, res) => {
       return res.status(402).json({ error: "SUBSCRIPTION_EXPIRED" });
     }
 
+    if (purchase.acknowledgementState !== "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED") {
+      await publisher.purchases.subscriptions.acknowledge({
+        packageName,
+        subscriptionId: productId,
+        token: purchaseToken,
+        requestBody: {}
+      });
+    }
+
     const { data: existingPurchase, error: existingPurchaseError } = await supabase.from("subscriptions")
       .select("user_id")
       .eq("purchase_token", purchaseToken)
