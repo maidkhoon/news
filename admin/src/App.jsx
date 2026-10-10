@@ -4,6 +4,34 @@ import "./styles.css";
 
 const API_URL = (import.meta.env.VITE_API_BASE_URL || "https://news-api-egmd.onrender.com").replace(/\/$/, "");
 const EMPTY_FORM = { title: "", category_id: "", content: "", image_url: "", access_type: "FREE", status: "DRAFT" };
+const EMPTY_CATEGORY = { name: "", slug: "" };
+
+function resizeCoverImage(file, width, height, mode) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) return reject(new Error("Image editor is unavailable in this browser."));
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+      const scale = mode === "cover" ? Math.max(width / image.width, height / image.height) : Math.min(width / image.width, height / image.height);
+      const drawWidth = image.width * scale;
+      const drawHeight = image.height * scale;
+      context.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not process this image.")), "image/jpeg", 0.88);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("This image could not be opened."));
+    };
+    image.src = objectUrl;
+  });
+}
 
 function App() {
   const [session, setSession] = useState(null);
@@ -23,6 +51,15 @@ function App() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState("articles");
+  const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
+  const [categoryForm, setCategoryForm] = useState(EMPTY_CATEGORY);
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [imagePreset, setImagePreset] = useState("1200x675");
+  const [imageMode, setImageMode] = useState("cover");
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imagePreview, setImagePreview] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -63,11 +100,7 @@ function App() {
     setError("");
     try {
       const [categoryResponse, articleResponse] = await Promise.all([
-        fetch(`${API_URL}/api/categories`).then(async (r) => {
-          const body = await r.json();
-          if (!r.ok) throw new Error(body.error || "Could not load categories");
-          return body;
-        }),
+        apiFetch("/api/admin/categories"),
         apiFetch("/api/admin/articles?page=1&limit=100"),
       ]);
       setCategories(categoryResponse.data || []);
