@@ -4,6 +4,34 @@ import "./styles.css";
 
 const API_URL = (import.meta.env.VITE_API_BASE_URL || "https://news-api-egmd.onrender.com").replace(/\/$/, "");
 const EMPTY_FORM = { title: "", category_id: "", content: "", image_url: "", access_type: "FREE", status: "DRAFT" };
+const EMPTY_CATEGORY = { name: "", slug: "" };
+
+function resizeCoverImage(file, width, height, mode) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) return reject(new Error("Image editor is unavailable in this browser."));
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, width, height);
+      const scale = mode === "cover" ? Math.max(width / image.width, height / image.height) : Math.min(width / image.width, height / image.height);
+      const drawWidth = image.width * scale;
+      const drawHeight = image.height * scale;
+      context.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not process this image.")), "image/jpeg", 0.88);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("This image could not be opened."));
+    };
+    image.src = objectUrl;
+  });
+}
 
 function App() {
   const [session, setSession] = useState(null);
@@ -23,6 +51,15 @@ function App() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState("articles");
+  const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
+  const [categoryForm, setCategoryForm] = useState(EMPTY_CATEGORY);
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [imagePreset, setImagePreset] = useState("1200x675");
+  const [imageMode, setImageMode] = useState("cover");
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imagePreview, setImagePreview] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -63,11 +100,7 @@ function App() {
     setError("");
     try {
       const [categoryResponse, articleResponse] = await Promise.all([
-        fetch(`${API_URL}/api/categories`).then(async (r) => {
-          const body = await r.json();
-          if (!r.ok) throw new Error(body.error || "Could not load categories");
-          return body;
-        }),
+        apiFetch("/api/admin/categories"),
         apiFetch("/api/admin/articles?page=1&limit=100"),
       ]);
       setCategories(categoryResponse.data || []);
@@ -117,6 +150,7 @@ function App() {
   function openCreate() {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, category_id: categories[0]?.id || "" });
+    setImagePreview("");
     setEditorOpen(true);
     setError("");
     setNotice("");
@@ -132,6 +166,7 @@ function App() {
       access_type: article.access_type || "FREE",
       status: article.status || "DRAFT",
     });
+    setImagePreview(article.image_url || "");
     setEditorOpen(true);
     setError("");
     setNotice("");
@@ -195,6 +230,95 @@ function App() {
     }
   }
 
+  function openCreateCategory() {
+    setEditingCategoryId(null);
+    setCategoryForm(EMPTY_CATEGORY);
+    setCategoryEditorOpen(true);
+    setError("");
+    setNotice("");
+  }
+
+  function openEditCategory(category) {
+    setEditingCategoryId(category.id);
+    setCategoryForm({ name: category.name || "", slug: category.slug || "" });
+    setCategoryEditorOpen(true);
+    setError("");
+    setNotice("");
+  }
+
+  async function saveCategory(event) {
+    event.preventDefault();
+    setCategorySaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await apiFetch(
+        editingCategoryId ? `/api/admin/categories/${editingCategoryId}` : "/api/admin/categories",
+        { method: editingCategoryId ? "PATCH" : "POST", body: JSON.stringify(categoryForm) },
+      );
+      setCategories((current) => {
+        const next = editingCategoryId
+          ? current.map((item) => item.id === result.data.id ? result.data : item)
+          : [...current, result.data];
+        return next.sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setCategoryEditorOpen(false);
+      setNotice(editingCategoryId ? "Category updated." : "Category created.");
+    } catch (err) {
+      setError(err.message || "Unable to save category.");
+    } finally {
+      setCategorySaving(false);
+    }
+  }
+
+  async function deleteCategory(category) {
+    if (!window.confirm(`Delete category “${category.name}”? Categories with articles cannot be deleted.`)) return;
+    setError("");
+    setNotice("");
+    try {
+      await apiFetch(`/api/admin/categories/${category.id}`, { method: "DELETE" });
+      setCategories((current) => current.filter((item) => item.id !== category.id));
+      if (categoryFilter === category.id) setCategoryFilter("ALL");
+      setNotice("Category deleted.");
+    } catch (err) {
+      setError(err.message || "Unable to delete category.");
+    }
+  }
+
+  async function uploadCoverImage(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setError("Choose a JPG, PNG or WebP image.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("The original image must be 10 MB or smaller.");
+      return;
+    }
+    const [width, height] = imagePreset.split("x").map(Number);
+    setImageUploading(true);
+    setError("");
+    setNotice("");
+    try {
+      const resized = await resizeCoverImage(file, width, height, imageMode);
+      const objectPath = `covers/${Date.now()}-${crypto.randomUUID()}.jpg`;
+      const { error: uploadError } = await supabase.storage.from("article-images").upload(
+        objectPath, resized, { contentType: "image/jpeg", upsert: false, cacheControl: "3600" },
+      );
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from("article-images").getPublicUrl(objectPath);
+      setForm((current) => ({ ...current, image_url: data.publicUrl }));
+      setImagePreview(data.publicUrl);
+      setNotice(`Cover image processed to ${width} × ${height} and uploaded.`);
+    } catch (err) {
+      setError(err.message || "Unable to upload image. Confirm the CMS storage migration has been applied.");
+    } finally {
+      setImageUploading(false);
+    }
+  }
+
   if (checkingSession) return <div className="center-screen"><div className="spinner" /><p>Checking your session…</p></div>;
 
   if (!session) return (
@@ -221,8 +345,8 @@ function App() {
       <aside className="sidebar">
         <a className="brand" href="#" aria-label="News admin home"><span className="brand-mark small">N<span>.</span></span><span>newsroom<small>ADMIN CONSOLE</small></span></a>
         <div className="workspace-label">WORKSPACE</div>
-        <div className="nav-item active"><span className="nav-icon">▦</span> Articles <span className="nav-count">{articles.length}</span></div>
-        <div className="nav-item muted-nav"><span className="nav-icon">◈</span> Categories</div>
+        <button className={`nav-item ${page === "articles" ? "active" : ""}`} onClick={() => setPage("articles")}><span className="nav-icon">▦</span> Articles <span className="nav-count">{articles.length}</span></button>
+        <button className={`nav-item ${page === "categories" ? "active" : ""}`} onClick={() => setPage("categories")}><span className="nav-icon">◈</span> Categories <span className="nav-count">{categories.length}</span></button>
         <div className="sidebar-bottom">
           <div className="secure-note"><span>✳</span><div><strong>Secure workspace</strong><small>Role-protected access</small></div></div>
           <div className="user-row"><div className="avatar">{(session.user.email || "A").slice(0, 1).toUpperCase()}</div><div className="user-meta"><strong>{session.user.email}</strong><small>Administrator</small></div><button className="icon-button" onClick={signOut} title="Sign out" aria-label="Sign out">↗</button></div>
@@ -230,23 +354,23 @@ function App() {
       </aside>
 
       <main className="main-content">
-        <header className="topbar"><div><span className="breadcrumb">Workspace</span><span className="crumb-divider">/</span><strong>Articles</strong></div><div className="topbar-right"><span className="live-dot" /> API connected <button className="avatar top-avatar">{(session.user.email || "A").slice(0, 1).toUpperCase()}</button></div></header>
+        <header className="topbar"><div><span className="breadcrumb">Workspace</span><span className="crumb-divider">/</span><strong>{page === "articles" ? "Articles" : "Categories"}</strong></div><div className="topbar-right"><span className="live-dot" /> API connected <button className="avatar top-avatar">{(session.user.email || "A").slice(0, 1).toUpperCase()}</button></div></header>
         <section className="page-heading">
-          <div><p className="eyebrow">CONTENT MANAGEMENT</p><h1>Articles <span className="heading-period">.</span></h1><p className="muted">Create, organize and publish your newsroom content.</p></div>
-          <button className="primary-button" onClick={openCreate}>＋ <span>New article</span></button>
+          <div><p className="eyebrow">CONTENT MANAGEMENT</p><h1>{page === "articles" ? "Articles" : "Categories"} <span className="heading-period">.</span></h1><p className="muted">{page === "articles" ? "Create, organize and publish your newsroom content." : "Create and organize the sections that power your app."}</p></div>
+          {page === "articles" ? <button className="primary-button" onClick={openCreate}>＋ <span>New article</span></button> : <button className="primary-button" onClick={openCreateCategory}>＋ <span>New category</span></button>}
         </section>
 
-        <section className="stats-grid">
+        {page === "articles" && <section className="stats-grid">
           <div className="stat-card"><div className="stat-label">Total articles <span>↗</span></div><div className="stat-number">{counts.all}</div><div className="stat-caption">Across all categories</div></div>
           <div className="stat-card"><div className="stat-label">Published <span className="stat-symbol green">●</span></div><div className="stat-number">{counts.published}</div><div className="stat-caption">Visible to readers</div></div>
           <div className="stat-card"><div className="stat-label">Drafts <span className="stat-symbol amber">◷</span></div><div className="stat-number">{counts.drafts}</div><div className="stat-caption">Work in progress</div></div>
           <div className="stat-card"><div className="stat-label">Premium <span className="stat-symbol violet">◆</span></div><div className="stat-number">{counts.premium}</div><div className="stat-caption">Subscriber content</div></div>
-        </section>
+        </section>}
 
         {error && <div className="alert error-alert"><strong>Something needs attention</strong><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error">×</button></div>}
         {notice && <div className="alert success-alert"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Dismiss message">×</button></div>}
 
-        <section className="content-card">
+        {page === "articles" && <section className="content-card">
           <div className="table-heading"><div><h2>All articles</h2><p className="muted">Manage drafts and published research.</p></div><button className="secondary-button" onClick={loadData} disabled={loading}>↻ <span>Refresh</span></button></div>
           <div className="filters">
             <label className="search-box"><span>⌕</span><input aria-label="Search articles" placeholder="Search by title or slug…" value={search} onChange={(e) => setSearch(e.target.value)} /><kbd>⌘ K</kbd></label>
@@ -271,9 +395,42 @@ function App() {
             </table>
           </div>
           <div className="table-footer"><span>Showing <strong>{filteredArticles.length}</strong> of <strong>{articles.length}</strong> articles</span><span>INDIA <b>·</b> CRYPTO</span></div>
-        </section>
+        </section>}
+
+        {page === "categories" && <section className="content-card">
+          <div className="table-heading"><div><h2>All categories</h2><p className="muted">Manage the sections used by articles and mobile app feeds.</p></div><button className="secondary-button" onClick={loadData} disabled={loading}>↻ <span>Refresh</span></button></div>
+          <div className="table-wrap">
+            <table><thead><tr><th>CATEGORY NAME</th><th>SLUG</th><th>ARTICLES</th><th>UPDATED</th><th><span className="sr-only">Actions</span></th></tr></thead>
+              <tbody>
+                {loading ? <tr><td colSpan="5" className="empty-state"><div className="spinner" />Loading categories…</td></tr> :
+                  categories.length === 0 ? <tr><td colSpan="5" className="empty-state"><div className="empty-icon">◈</div><strong>No categories yet</strong><span>Create a category before publishing articles.</span><button className="secondary-button" onClick={openCreateCategory}>＋ Create category</button></td></tr> :
+                  categories.map((category) => <tr key={category.id}>
+                    <td><strong>{category.name}</strong></td>
+                    <td><code className="category-slug">{category.slug}</code></td>
+                    <td><span className="category-pill">{articles.filter((article) => article.category_id === category.id).length} articles</span></td>
+                    <td className="date-cell">{category.updated_at ? new Date(category.updated_at).toLocaleDateString() : "—"}</td>
+                    <td><div className="row-actions"><button className="icon-button" title="Edit category" aria-label={`Edit ${category.name}`} onClick={() => openEditCategory(category)}>✎</button><button className="icon-button danger-action" title="Delete category" aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)}>⌫</button></div></td>
+                  </tr>)
+                }
+              </tbody>
+            </table>
+          </div>
+          <div className="table-footer"><span><strong>{categories.length}</strong> categories</span><span>Slugs power API filters</span></div>
+        </section>}
         <footer className="page-footer"><span>NEWSROOM ADMIN</span><span>Write with clarity. Publish with confidence.</span></footer>
       </main>
+
+      {categoryEditorOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setCategoryEditorOpen(false); }}>
+        <section className="editor-modal category-editor-modal" role="dialog" aria-modal="true" aria-labelledby="category-editor-title">
+          <div className="modal-header"><div><p className="eyebrow">TAXONOMY</p><h2 id="category-editor-title">{editingCategoryId ? "Edit category" : "Create a category"}</h2></div><button className="icon-button close-button" onClick={() => setCategoryEditorOpen(false)} aria-label="Close category editor">×</button></div>
+          <form onSubmit={saveCategory} className="editor-form">
+            <label>Category name<input value={categoryForm.name} onChange={(e) => setCategoryForm((current) => ({ ...current, name: e.target.value }))} maxLength="80" placeholder="e.g. Technology" required /></label>
+            <label>Slug <span className="optional-label">Lowercase URL identifier</span><input value={categoryForm.slug} onChange={(e) => setCategoryForm((current) => ({ ...current, slug: e.target.value }))} placeholder="technology" /></label>
+            <p className="muted">Changing a slug changes the category filter used by the mobile app and news ingestion.</p>
+            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setCategoryEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={categorySaving}>{categorySaving ? "Saving…" : editingCategoryId ? "Save category" : "Create category"}</button></div>
+          </form>
+        </section>
+      </div>}
 
       {editorOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditorOpen(false); }}>
         <section className="editor-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
@@ -281,7 +438,16 @@ function App() {
           <form onSubmit={saveArticle} className="editor-form">
             <label>Article title<input name="title" value={form.title} onChange={changeForm} maxLength="240" placeholder="Write a clear, specific headline" required /></label>
             <div className="form-two-col"><label>Category<select name="category_id" value={form.category_id} onChange={changeForm} required><option value="">Choose category</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Content access<select name="access_type" value={form.access_type} onChange={changeForm}><option value="FREE">Free</option><option value="PREMIUM">Premium</option></select></label></div>
-            <label>Cover image URL <span className="optional-label">Optional</span><input type="url" name="image_url" value={form.image_url} onChange={changeForm} placeholder="https://example.com/image.jpg" /></label>
+            <div className="image-upload-panel">
+              <div className="image-upload-heading"><div><strong>Cover image</strong><p>Upload, resize and crop before saving the article.</p></div><span className="optional-label">Optional</span></div>
+              <div className="form-two-col">
+                <label>Output size<select value={imagePreset} onChange={(e) => setImagePreset(e.target.value)}><option value="1200x675">1200 × 675 · Article cover</option><option value="1600x900">1600 × 900 · High resolution</option><option value="800x800">800 × 800 · Square</option></select></label>
+                <label>Resize mode<select value={imageMode} onChange={(e) => setImageMode(e.target.value)}><option value="cover">Fill & crop</option><option value="contain">Fit entire image</option></select></label>
+              </div>
+              <label className="upload-dropzone"><span className="upload-icon">↑</span><span>{imageUploading ? "Processing and uploading…" : "Choose image from your computer"}</span><small>JPG, PNG or WebP · original max 10 MB</small><input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadCoverImage} disabled={imageUploading} /></label>
+              {(imagePreview || form.image_url) && <div className="cover-preview"><img src={imagePreview || form.image_url} alt="Cover preview" /><button type="button" className="secondary-button" onClick={() => { setForm((current) => ({ ...current, image_url: "" })); setImagePreview(""); }}>Remove image</button></div>}
+              <label>Or paste an image URL<input type="url" name="image_url" value={form.image_url} onChange={(e) => { changeForm(e); setImagePreview(""); }} placeholder="https://example.com/image.jpg" /></label>
+            </div>
             <label>Article content<textarea name="content" value={form.content} onChange={changeForm} rows="10" placeholder="Write your article or research here…" required /></label>
             <label>Publishing status<select name="status" value={form.status} onChange={changeForm}><option value="DRAFT">Save as draft</option><option value="PUBLISHED">Publish now</option><option value="UNPUBLISHED">Unpublished</option></select></label>
             <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes" : "Create article"}</button></div>

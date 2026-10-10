@@ -5,6 +5,7 @@ import helmet from "helmet";
 import articleRoutes from "./routes/articles.js";
 import categoryRoutes from "./routes/categories.js";
 import adminRoutes from "./routes/admin.js";
+import adminCategoryRoutes from "./routes/admin-categories.js";
 import userRoutes from "./routes/users.js";
 import deviceRoutes from "./routes/devices.js";
 import notificationRoutes from "./routes/notifications.js";
@@ -37,6 +38,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/devices", deviceRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/api/admin/categories", adminCategoryRoutes);
 app.use("/api/admin", adminRoutes);
 
 app.use((_req, res) => {
