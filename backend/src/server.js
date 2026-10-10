@@ -11,6 +11,7 @@ import userRoutes from "./routes/users.js";
 import deviceRoutes from "./routes/devices.js";
 import notificationRoutes from "./routes/notifications.js";
 import subscriptionRoutes from "./routes/subscriptions.js";
+import insightRoutes from "./routes/insights.js";
 import { startNewsIngestionScheduler } from "./lib/news-ingestion.js";
 
 const app = express();
@@ -39,6 +40,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/devices", deviceRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/api/insights", insightRoutes);
 app.use("/api/admin/categories", adminCategoryRoutes);
 app.use("/api/admin", adminUserRoutes);
 app.use("/api/admin", adminRoutes);
