@@ -124,6 +124,8 @@ export default function App() {
   const [marketView, setMarketView] = useState<'gainers' | 'losers'>('gainers')
   const [ticker, setTicker] = useState<MarketTicker | null>(null)
   const [tickerUpdatedAt, setTickerUpdatedAt] = useState('')
+  const tickerScrollRef = useRef<ScrollView | null>(null)
+  const [tickerContentWidth, setTickerContentWidth] = useState(0)
   const [filter, setFilter] = useState('All')
   const [tab, setTab] = useState<Tab>('Home')
   const [search, setSearch] = useState('')
@@ -293,6 +295,18 @@ export default function App() {
     const interval = setInterval(() => void loadTicker(), 60_000)
     return () => clearInterval(interval)
   }, [loadTicker])
+
+  useEffect(() => {
+    if (!tickerContentWidth) return
+    let offset = 0
+    const halfWidth = tickerContentWidth / 2
+    const interval = setInterval(() => {
+      offset += 1
+      if (offset >= halfWidth) offset = 0
+      tickerScrollRef.current?.scrollTo({ x: offset, animated: false })
+    }, 35)
+    return () => clearInterval(interval)
+  }, [tickerContentWidth, ticker?.items?.length])
 
   const loadBriefing = async (article: Article) => {
     setBriefingLoading(true)
@@ -910,7 +924,7 @@ export default function App() {
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
       <View style={styles.tickerBar}>
         <Text style={styles.tickerLabel}>LIVE</Text>
-        {ticker?.items?.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tickerContent}>
+        {ticker?.items?.length ? <ScrollView ref={tickerScrollRef} horizontal showsHorizontalScrollIndicator={false} onContentSizeChange={width => setTickerContentWidth(width)} contentContainerStyle={styles.tickerContent}>
           {[...ticker.items, ...ticker.items].map((item, index) => <View key={item.kind + '-' + item.exchange + '-' + item.symbol + '-' + index} style={styles.tickerItem}>
             <Text style={styles.tickerSymbol}>{item.symbol}{item.exchange ? ' · ' + item.exchange : ''}</Text>
             <Text style={styles.tickerPrice}>{item.currency === 'INR' ? '₹' : ''}{item.price.toLocaleString('en-IN', { maximumFractionDigits: item.price < 100 ? 2 : 0 })}</Text>
