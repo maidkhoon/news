@@ -228,6 +228,95 @@ function App() {
     }
   }
 
+  function openCreateCategory() {
+    setEditingCategoryId(null);
+    setCategoryForm(EMPTY_CATEGORY);
+    setCategoryEditorOpen(true);
+    setError("");
+    setNotice("");
+  }
+
+  function openEditCategory(category) {
+    setEditingCategoryId(category.id);
+    setCategoryForm({ name: category.name || "", slug: category.slug || "" });
+    setCategoryEditorOpen(true);
+    setError("");
+    setNotice("");
+  }
+
+  async function saveCategory(event) {
+    event.preventDefault();
+    setCategorySaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await apiFetch(
+        editingCategoryId ? `/api/admin/categories/${editingCategoryId}` : "/api/admin/categories",
+        { method: editingCategoryId ? "PATCH" : "POST", body: JSON.stringify(categoryForm) },
+      );
+      setCategories((current) => {
+        const next = editingCategoryId
+          ? current.map((item) => item.id === result.data.id ? result.data : item)
+          : [...current, result.data];
+        return next.sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setCategoryEditorOpen(false);
+      setNotice(editingCategoryId ? "Category updated." : "Category created.");
+    } catch (err) {
+      setError(err.message || "Unable to save category.");
+    } finally {
+      setCategorySaving(false);
+    }
+  }
+
+  async function deleteCategory(category) {
+    if (!window.confirm(`Delete category “${category.name}”? Categories with articles cannot be deleted.`)) return;
+    setError("");
+    setNotice("");
+    try {
+      await apiFetch(`/api/admin/categories/${category.id}`, { method: "DELETE" });
+      setCategories((current) => current.filter((item) => item.id !== category.id));
+      if (categoryFilter === category.id) setCategoryFilter("ALL");
+      setNotice("Category deleted.");
+    } catch (err) {
+      setError(err.message || "Unable to delete category.");
+    }
+  }
+
+  async function uploadCoverImage(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setError("Choose a JPG, PNG or WebP image.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("The original image must be 10 MB or smaller.");
+      return;
+    }
+    const [width, height] = imagePreset.split("x").map(Number);
+    setImageUploading(true);
+    setError("");
+    setNotice("");
+    try {
+      const resized = await resizeCoverImage(file, width, height, imageMode);
+      const objectPath = `covers/${Date.now()}-${crypto.randomUUID()}.jpg`;
+      const { error: uploadError } = await supabase.storage.from("article-images").upload(
+        objectPath, resized, { contentType: "image/jpeg", upsert: false, cacheControl: "3600" },
+      );
+      if (uploadError) throw uploadError;
+      const { data } = supabase.storage.from("article-images").getPublicUrl(objectPath);
+      setForm((current) => ({ ...current, image_url: data.publicUrl }));
+      setImagePreview(data.publicUrl);
+      setNotice(`Cover image processed to ${width} × ${height} and uploaded.`);
+    } catch (err) {
+      setError(err.message || "Unable to upload image. Confirm the CMS storage migration has been applied.");
+    } finally {
+      setImageUploading(false);
+    }
+  }
+
   if (checkingSession) return <div className="center-screen"><div className="spinner" /><p>Checking your session…</p></div>;
 
   if (!session) return (
