@@ -16,6 +16,7 @@ import { startNewsIngestionScheduler } from "./lib/news-ingestion.js";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
+app.set("trust proxy", 1);
 
 app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
