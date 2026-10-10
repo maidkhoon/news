@@ -7,6 +7,7 @@ import { getAvailablePurchases, useIAP } from 'expo-iap'
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Image,
   Pressable,
   RefreshControl,
@@ -20,7 +21,7 @@ import {
   Platform,
 } from 'react-native'
 import type { Session } from '@supabase/supabase-js'
-import { supabase } from './lib/supabase'
+import { supabase, supabaseConfigError } from './lib/supabase'
 
 type AuthStep = 'phone' | 'otp'
 type Category = { id: string; name: string; slug: string }
@@ -36,7 +37,7 @@ type Article = {
   categories?: { name?: string; slug?: string } | null
 }
 type Tab = 'Home' | 'Crypto' | 'Sensex' | 'Nifty 50'
-type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved'
+type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth'
 type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
 
@@ -79,8 +80,12 @@ export default function App() {
   const [phone, setPhone] = useState('')
   const [otp, setOtp] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
   const [categories, setCategories] = useState<Category[]>([])
   const [articles, setArticles] = useState<Article[]>([])
+  const [page, setPage] = useState(1)
+  const [hasNextPage, setHasNextPage] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [feedLoading, setFeedLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [feedError, setFeedError] = useState('')
@@ -125,6 +130,7 @@ export default function App() {
   }
 
   const sendOtp = async () => {
+    if (authLoading || resendCooldown > 0) return
     try {
       setAuthLoading(true)
       const formattedPhone = normalizedPhone()
@@ -132,6 +138,7 @@ export default function App() {
       if (error) throw error
       setStep('otp')
       setOtp('')
+      setResendCooldown(30)
       Alert.alert('OTP sent', `We sent a 6-digit OTP to ${formattedPhone}.`)
     } catch (error) {
       Alert.alert('Unable to send OTP', error instanceof Error ? error.message : 'Please try again.')
@@ -140,6 +147,12 @@ export default function App() {
     }
   }
 
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const timer = setInterval(() => setResendCooldown(seconds => Math.max(0, seconds - 1)), 1000)
+    return () => clearInterval(timer)
+  }, [resendCooldown])
+
   const verifyOtp = async () => {
     try {
       setAuthLoading(true)
@@ -147,6 +160,7 @@ export default function App() {
       if (!/^\d{6}$/.test(otp)) throw new Error('Enter the 6-digit OTP.')
       const { error } = await supabase.auth.verifyOtp({ phone: formattedPhone, token: otp, type: 'sms' })
       if (error) throw error
+      setScreen('home')
     } catch (error) {
       Alert.alert('OTP verification failed', error instanceof Error ? error.message : 'Please try again.')
     } finally {
@@ -154,27 +168,51 @@ export default function App() {
     }
   }
 
-  const loadFeed = useCallback(async (isRefresh = false) => {
+  // Guests can browse freely; this only opens the optional sign-in screen.
+  const openSignIn = useCallback(() => {
+    setStep('phone')
+    setOtp('')
+    setResendCooldown(0)
+    setScreen('auth')
+  }, [])
+
+  const promptSignIn = useCallback((message: string) => {
+    Alert.alert('Sign in required', message, [{ text: 'Not now' }, { text: 'Sign in', onPress: openSignIn }])
+  }, [openSignIn])
+
+  const loadFeed = useCallback(async (opts: { isRefresh?: boolean; nextPage?: number } = {}) => {
+    const { isRefresh = false, nextPage = 1 } = opts
     if (isRefresh) setRefreshing(true)
+    else if (nextPage > 1) setLoadingMore(true)
     else setFeedLoading(true)
     setFeedError('')
     try {
       const [categoryResponse, articleResponse] = await Promise.all([
-        fetch(`${API_BASE}/api/categories`),
-        fetch(`${API_BASE}/api/articles?limit=30`),
+        nextPage === 1 ? fetch(`${API_BASE}/api/categories`) : Promise.resolve(null),
+        fetch(`${API_BASE}/api/articles?limit=30&page=${nextPage}`),
       ])
-      if (!categoryResponse.ok || !articleResponse.ok) throw new Error('The newsroom service is temporarily unavailable.')
-      const categoryJson = await categoryResponse.json()
+      if ((categoryResponse && !categoryResponse.ok) || !articleResponse.ok) throw new Error('The newsroom service is temporarily unavailable.')
       const articleJson = await articleResponse.json()
-      setCategories(Array.isArray(categoryJson.data) ? categoryJson.data : [])
-      setArticles(Array.isArray(articleJson.data) ? articleJson.data : [])
+      if (categoryResponse) {
+        const categoryJson = await categoryResponse.json()
+        setCategories(Array.isArray(categoryJson.data) ? categoryJson.data : [])
+      }
+      const newArticles: Article[] = Array.isArray(articleJson.data) ? articleJson.data : []
+      setArticles(current => (nextPage === 1 ? newArticles : [...current, ...newArticles]))
+      setHasNextPage(Boolean(articleJson.pagination?.hasNextPage))
+      setPage(nextPage)
     } catch (error) {
       setFeedError(error instanceof Error ? error.message : 'Unable to load research.')
     } finally {
       setFeedLoading(false)
       setRefreshing(false)
+      setLoadingMore(false)
     }
   }, [])
+
+  const loadMoreArticles = useCallback(() => {
+    if (hasNextPage && !loadingMore && !feedLoading) void loadFeed({ nextPage: page + 1 })
+  }, [hasNextPage, loadingMore, feedLoading, page, loadFeed])
 
   const loadMemberData = useCallback(async (accessToken: string) => {
     const headers = { Authorization: `Bearer ${accessToken}` }
@@ -283,6 +321,10 @@ export default function App() {
   }, [billingConnected, fetchProducts])
 
   const buySelectedPlan = async () => {
+    if (!session?.access_token) {
+      promptSignIn('Sign in to purchase a BazaarNexa subscription.')
+      return
+    }
     const productKey = `${chosenPlan}_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
     const productId = PLAY_PRODUCTS[productKey]
     if (!productId) {
@@ -323,7 +365,10 @@ export default function App() {
   }
 
   const restorePurchases = async () => {
-    if (!session?.access_token) return
+    if (!session?.access_token) {
+      promptSignIn('Sign in to restore your BazaarNexa subscription.')
+      return
+    }
     try {
       const purchases = await getAvailablePurchases()
       if (!purchases.length) {
@@ -360,14 +405,18 @@ export default function App() {
   }
 
   useEffect(() => {
+    // Articles are public; guests see the feed without signing in.
+    loadFeed()
+  }, [loadFeed])
+
+  useEffect(() => {
     if (session) {
-      loadFeed()
       loadMemberData(session.access_token)
       void registerPushDevice(session.access_token)
     } else {
       setActiveSubscription(null)
     }
-  }, [session, loadFeed, loadMemberData, registerPushDevice])
+  }, [session, loadMemberData, registerPushDevice])
 
   useEffect(() => {
     const responseSubscription = Notifications.addNotificationResponseReceivedListener(response => {
@@ -392,14 +441,18 @@ export default function App() {
   }, [savedIds, savedLoaded])
 
   const openArticle = async (article: Article) => {
-    if (!session?.access_token) return
     setSelectedArticle(article)
     try {
-      const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(article.slug)}`, { headers: { Authorization: `Bearer ${session.access_token}` } })
+      const headers: Record<string, string> = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}
+      const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(article.slug)}`, { headers })
       const json = await response.json()
       if (response.status === 403 || json.error === 'PREMIUM_REQUIRED') {
         setSelectedArticle(null)
-        Alert.alert('Premium research', 'An active BazaarNexa subscription is required to read this report.', [{ text: 'Not now' }, { text: 'View plans', onPress: () => { setSelectedArticle(null); setScreen('plans') } }])
+        if (!session) {
+          Alert.alert('Premium research', 'Sign in and subscribe to read this report.', [{ text: 'Not now' }, { text: 'Sign in', onPress: openSignIn }])
+        } else {
+          Alert.alert('Premium research', 'An active BazaarNexa subscription is required to read this report.', [{ text: 'Not now' }, { text: 'View plans', onPress: () => { setSelectedArticle(null); setScreen('plans') } }])
+        }
         return
       }
       if (response.ok && json.data) setSelectedArticle(json.data)
@@ -433,14 +486,27 @@ export default function App() {
 
   const formatExpiry = (value: string) => new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 
+  if (supabaseConfigError) {
+    return (
+      <SafeAreaView style={styles.loadingScreen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <Text style={styles.stateTitle}>Configuration required</Text>
+        <Text style={[styles.muted, styles.configErrorText]}>{supabaseConfigError}</Text>
+      </SafeAreaView>
+    )
+  }
+
   if (initializing) {
     return <SafeAreaView style={styles.loadingScreen}><StatusBar barStyle="light-content" backgroundColor={COLORS.background} /><ActivityIndicator color={COLORS.blue} size="large" /><Text style={styles.muted}>Preparing BazaarNexa…</Text></SafeAreaView>
   }
 
-  if (!session) {
+  if (screen === 'auth') {
     return (
       <SafeAreaView style={styles.authScreen}>
         <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <Pressable onPress={() => setScreen('home')} style={styles.authBackButton} hitSlop={10}>
+          <Text style={styles.backText}>‹  Continue browsing</Text>
+        </Pressable>
         <View style={styles.authHero}>
           <View style={styles.logo}><Text style={styles.logoGlyph}>↗</Text><Text style={styles.logoBars}>▥</Text></View>
           <Text style={styles.wordmark}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text>
@@ -461,7 +527,14 @@ export default function App() {
           <Pressable style={[styles.primaryButton, authLoading && styles.disabled]} onPress={step === 'phone' ? sendOtp : verifyOtp} disabled={authLoading}>
             {authLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>{step === 'phone' ? 'Send OTP   →' : 'Verify OTP   →'}</Text>}
           </Pressable>
-          {step === 'otp' && <Pressable style={styles.textButton} onPress={() => { setStep('phone'); setOtp('') }}><Text style={styles.linkText}>Change mobile number</Text></Pressable>}
+          {step === 'otp' && (
+            <View style={styles.otpActionsRow}>
+              <Pressable style={styles.textButton} onPress={() => { setStep('phone'); setOtp(''); setResendCooldown(0) }}><Text style={styles.linkText}>Change mobile number</Text></Pressable>
+              <Pressable style={styles.textButton} onPress={sendOtp} disabled={authLoading || resendCooldown > 0}>
+                <Text style={[styles.linkText, resendCooldown > 0 && styles.linkTextDisabled]}>{resendCooldown > 0 ? `Resend OTP in ${resendCooldown}s` : 'Resend OTP'}</Text>
+              </Pressable>
+            </View>
+          )}
           <Text style={styles.legal}>By continuing, you agree to our Terms & Conditions and Privacy Policy.</Text>
         </View>
         <Text style={styles.disclaimer}>Research and educational content only. Not investment advice.</Text>
@@ -588,23 +661,30 @@ export default function App() {
         </View>
         <ScrollView contentContainerStyle={styles.plansContent}>
           <Text style={styles.plansTitle}>Market alerts & research</Text>
-          {notificationsLoading ? <ActivityIndicator color={COLORS.blue} size="large" /> : null}
-          {!notificationsLoading && notificationItems.length === 0 ? <View style={styles.stateCard}><Text style={styles.stateTitle}>You're all caught up</Text><Text style={styles.muted}>When new research is published, notifications will appear here and on your device when push notifications are configured.</Text></View> : null}
-          {notificationItems.map(item => (
-            <Pressable key={item.id} style={styles.notificationCard} onPress={() => {
-              const slug = item.articles?.slug
-              if (!slug) return
-              fetch(`${API_BASE}/api/articles/${encodeURIComponent(slug)}`, { headers: { Authorization: `Bearer ${session.access_token}` } }).then(async response => {
-                const json = await response.json()
-                if (response.ok && json.data) { setSelectedArticle(json.data); setScreen('home') }
-                else if (response.status === 403) Alert.alert('Premium research', 'An active subscription is required.', [{ text: 'Cancel' }, { text: 'View plans', onPress: () => setScreen('plans') }])
-              }).catch(() => Alert.alert('Unavailable', 'Please try again later.'))
-            }}>
-              <Text style={styles.notificationTitle}>{item.title}</Text>
-              <Text style={styles.muted}>{item.message}</Text>
-              <Text style={styles.articleTime}>{readableDate(item.created_at)}</Text>
-            </Pressable>
-          ))}
+          {!session ? (
+            <View style={styles.stateCard}>
+              <Text style={styles.stateTitle}>Sign in required</Text>
+              <Text style={styles.muted}>Notifications are tied to your BazaarNexa account. Sign in to see research alerts.</Text>
+              <Pressable onPress={openSignIn} style={styles.retryButton}><Text style={styles.retryText}>Sign in</Text></Pressable>
+            </View>
+          ) : (
+            <>
+              {notificationsLoading ? <ActivityIndicator color={COLORS.blue} size="large" /> : null}
+              {!notificationsLoading && notificationItems.length === 0 ? <View style={styles.stateCard}><Text style={styles.stateTitle}>You're all caught up</Text><Text style={styles.muted}>When new research is published, notifications will appear here and on your device when push notifications are configured.</Text></View> : null}
+              {notificationItems.map(item => (
+                <Pressable key={item.id} style={styles.notificationCard} onPress={() => {
+                  const slug = item.articles?.slug
+                  if (!slug) return
+                  void openArticle({ id: item.article_id || item.id, slug, title: item.title })
+                  setScreen('home')
+                }}>
+                  <Text style={styles.notificationTitle}>{item.title}</Text>
+                  <Text style={styles.muted}>{item.message}</Text>
+                  <Text style={styles.articleTime}>{readableDate(item.created_at)}</Text>
+                </Pressable>
+              ))}
+            </>
+          )}
         </ScrollView>
       </SafeAreaView>
     )
@@ -641,41 +721,25 @@ export default function App() {
         <View style={styles.brandMark}><Text style={styles.brandMarkText}>↗</Text></View>
         <View style={styles.headerCopy}><Text style={styles.headerTitle}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text><Text style={styles.headerSub}>INDIA & CRYPTO RESEARCH</Text></View>
         <Pressable onPress={() => { setSearchOpen(open => !open); setSearch('') }} style={styles.headerIcon}><Text style={styles.headerIconText}>⌕</Text></Pressable>
-        <Pressable onPress={() => { setScreen('notifications'); void loadNotifications() }} style={styles.headerIcon}><Text style={styles.headerIconText}>♧</Text></Pressable>
-        <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || 'member'), [{ text: 'Close' }, { text: 'Saved articles', onPress: () => setScreen('saved') }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar}><Text style={styles.avatarText}>●</Text></Pressable>
+        <Pressable onPress={() => { setScreen('notifications'); if (session) void loadNotifications() }} style={styles.headerIcon}><Text style={styles.headerIconText}>♧</Text></Pressable>
+        {session ? (
+          <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || 'member'), [{ text: 'Close' }, { text: 'Saved articles', onPress: () => setScreen('saved') }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar}><Text style={styles.avatarText}>●</Text></Pressable>
+        ) : (
+          <Pressable onPress={openSignIn} style={styles.signInPill}><Text style={styles.signInPillText}>Sign in</Text></Pressable>
+        )}
       </View>
       {searchOpen ? <View style={styles.searchRow}><TextInput autoFocus value={search} onChangeText={setSearch} placeholder="Search research…" placeholderTextColor={COLORS.muted} style={styles.searchInput} /></View> : null}
-      <ScrollView
+      <FlatList
+        data={visibleArticles}
+        keyExtractor={article => article.id}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadFeed(true)} tintColor={COLORS.blue} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadFeed({ isRefresh: true })} tintColor={COLORS.blue} />}
         contentContainerStyle={styles.feedContent}
-      >
-        <View style={styles.marketStrip}>
-          <View style={styles.marketTile}><Text style={styles.marketEmoji}>🇮🇳</Text><View><Text style={styles.marketName}>INDIA</Text><Text style={styles.marketValue}>Market research</Text></View><Text style={styles.marketArrow}>↗</Text></View>
-          <View style={styles.marketTile}><Text style={styles.marketEmoji}>₿</Text><View><Text style={styles.marketName}>CRYPTO</Text><Text style={styles.marketValue}>Digital assets</Text></View><Text style={styles.marketArrow}>↗</Text></View>
-        </View>
-        <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>YOUR DAILY BRIEFING</Text><Text style={styles.sectionTitle}>Market Insight</Text></View><Pressable onPress={() => setScreen('plans')} style={styles.premiumPill}><Text style={styles.premiumText}>{activeSubscription ? '♛ Premium Active' : '♛ Premium'}</Text></Pressable></View>
-        {articles.length > 0 ? (
-          <Pressable onPress={() => openArticle(articles[0])} style={styles.heroCard}>
-            {articles[0].image_url ? <Image source={{ uri: articles[0].image_url }} style={styles.heroImage} resizeMode="cover" /> : <View style={styles.heroImageFallback}><Text style={styles.heroChart}>↗  INDIA  ·  CRYPTO</Text></View>}
-            <View style={styles.heroOverlay}>
-              <Text style={styles.heroTag}>{articles[0].categories?.name || 'LATEST RESEARCH'}</Text>
-              <Text numberOfLines={3} style={styles.heroTitle}>{articles[0].title}</Text>
-              <Text style={styles.heroCta}>Read research   →</Text>
-            </View>
-          </Pressable>
-        ) : (
-          <View style={styles.heroEmpty}><Text style={styles.heroEmptyIcon}>▥</Text><Text style={styles.heroEmptyTitle}>Research that brings clarity</Text><Text style={styles.heroEmptyText}>Your latest published market insights will appear here.</Text></View>
-        )}
-        <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>CURATED FOR YOU</Text><Text style={styles.sectionTitle}>Latest Articles</Text></View><Text style={styles.articleCount}>{articles.length} articles</Text></View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          {FILTERS.map(item => <Pressable key={item} onPress={() => { setFilter(item); setTab(item === 'Crypto' ? 'Crypto' : 'Home') }} style={[styles.filterPill, filter === item && tab === 'Home' && styles.filterPillActive]}><Text style={[styles.filterText, filter === item && tab === 'Home' && styles.filterTextActive]}>{item}</Text></Pressable>)}
-        </ScrollView>
-        {feedLoading && articles.length === 0 ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading the newsroom…</Text></View> : null}
-        {feedError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Couldn’t load research</Text><Text style={styles.muted}>{feedError}</Text><Pressable onPress={() => loadFeed()} style={styles.retryButton}><Text style={styles.retryText}>Try again</Text></Pressable></View> : null}
-        {!feedLoading && !feedError && visibleArticles.length === 0 ? <View style={styles.stateCard}><Text style={styles.stateTitle}>No articles yet</Text><Text style={styles.muted}>Published articles matching this section will appear here. Pull down to refresh.</Text></View> : null}
-        {visibleArticles.map((article, index) => (
-          <Pressable key={article.id} onPress={() => openArticle(article)} style={styles.articleCard}>
+        initialNumToRender={8}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS !== 'web'}
+        renderItem={({ item: article, index }) => (
+          <Pressable onPress={() => openArticle(article)} style={styles.articleCard}>
             {article.image_url ? <Image source={{ uri: article.image_url }} style={styles.articleImage} resizeMode="cover" /> : <View style={styles.articleImageFallback}><Text style={styles.fallbackGlyph}>{article.categories?.slug?.includes('crypto') ? '₿' : '↗'}</Text></View>}
             <View style={styles.articleCopy}>
               <View style={styles.articleTopline}><Text style={[styles.articleTag, index % 3 === 1 && styles.articleTagPurple]}>{article.categories?.name || 'Research'}</Text><Text style={styles.articleTime}>{readableDate(article.published_at)}</Text></View>
@@ -684,9 +748,49 @@ export default function App() {
               <View style={styles.articleBottom}><Text style={styles.readMore}>Read article  →</Text><Pressable hitSlop={10} onPress={() => setSavedIds(ids => ids.includes(article.id) ? ids.filter(id => id !== article.id) : [...ids, article.id])}><Text style={styles.bookmark}>{savedIds.includes(article.id) ? '🔖' : '♧'}</Text></Pressable></View>
             </View>
           </Pressable>
-        ))}
-        <Text style={styles.disclaimer}>BazaarNexa provides research and educational information only. Nothing here is a recommendation to buy or sell securities or crypto assets.</Text>
-      </ScrollView>
+        )}
+        ListHeaderComponent={
+          <>
+            <View style={styles.marketStrip}>
+              <View style={styles.marketTile}><Text style={styles.marketEmoji}>🇮🇳</Text><View><Text style={styles.marketName}>INDIA</Text><Text style={styles.marketValue}>Market research</Text></View><Text style={styles.marketArrow}>↗</Text></View>
+              <View style={styles.marketTile}><Text style={styles.marketEmoji}>₿</Text><View><Text style={styles.marketName}>CRYPTO</Text><Text style={styles.marketValue}>Digital assets</Text></View><Text style={styles.marketArrow}>↗</Text></View>
+            </View>
+            <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>YOUR DAILY BRIEFING</Text><Text style={styles.sectionTitle}>Market Insight</Text></View><Pressable onPress={() => setScreen('plans')} style={styles.premiumPill}><Text style={styles.premiumText}>{activeSubscription ? '♛ Premium Active' : '♛ Premium'}</Text></Pressable></View>
+            {articles.length > 0 ? (
+              <Pressable onPress={() => openArticle(articles[0])} style={styles.heroCard}>
+                {articles[0].image_url ? <Image source={{ uri: articles[0].image_url }} style={styles.heroImage} resizeMode="cover" /> : <View style={styles.heroImageFallback}><Text style={styles.heroChart}>↗  INDIA  ·  CRYPTO</Text></View>}
+                <View style={styles.heroOverlay}>
+                  <Text style={styles.heroTag}>{articles[0].categories?.name || 'LATEST RESEARCH'}</Text>
+                  <Text numberOfLines={3} style={styles.heroTitle}>{articles[0].title}</Text>
+                  <Text style={styles.heroCta}>Read research   →</Text>
+                </View>
+              </Pressable>
+            ) : (
+              <View style={styles.heroEmpty}><Text style={styles.heroEmptyIcon}>▥</Text><Text style={styles.heroEmptyTitle}>Research that brings clarity</Text><Text style={styles.heroEmptyText}>Your latest published market insights will appear here.</Text></View>
+            )}
+            <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>CURATED FOR YOU</Text><Text style={styles.sectionTitle}>Latest Articles</Text></View><Text style={styles.articleCount}>{articles.length} articles</Text></View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+              {FILTERS.map(item => <Pressable key={item} onPress={() => { setFilter(item); setTab(item === 'Crypto' ? 'Crypto' : 'Home') }} style={[styles.filterPill, filter === item && tab === 'Home' && styles.filterPillActive]}><Text style={[styles.filterText, filter === item && tab === 'Home' && styles.filterTextActive]}>{item}</Text></Pressable>)}
+            </ScrollView>
+            {(tab === 'Sensex' || tab === 'Nifty 50') && (
+              <Text style={styles.sectionNote}>Showing research that mentions “{tab}” by title. This is a text match on existing INDIA/CRYPTO articles, not a dedicated {tab} data feed.</Text>
+            )}
+            {feedLoading && articles.length === 0 ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading the newsroom…</Text></View> : null}
+            {feedError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Couldn’t load research</Text><Text style={styles.muted}>{feedError}</Text><Pressable onPress={() => loadFeed()} style={styles.retryButton}><Text style={styles.retryText}>Try again</Text></Pressable></View> : null}
+            {!feedLoading && !feedError && visibleArticles.length === 0 ? <View style={styles.stateCard}><Text style={styles.stateTitle}>No articles yet</Text><Text style={styles.muted}>Published articles matching this section will appear here. Pull down to refresh.</Text></View> : null}
+          </>
+        }
+        ListFooterComponent={
+          <>
+            {hasNextPage ? (
+              <Pressable onPress={loadMoreArticles} disabled={loadingMore} style={[styles.retryButton, styles.loadMoreButton, loadingMore && styles.disabled]}>
+                {loadingMore ? <ActivityIndicator color="#fff" /> : <Text style={styles.retryText}>Load more research</Text>}
+              </Pressable>
+            ) : null}
+            <Text style={styles.disclaimer}>BazaarNexa provides research and educational information only. Nothing here is a recommendation to buy or sell securities or crypto assets.</Text>
+          </>
+        }
+      />
       <View style={styles.bottomNav}>
         {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' ? 'Crypto' : item === 'Home' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{['⌂', '₿', '▥', '↗'][index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
       </View>
@@ -710,7 +814,13 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: COLORS.background },
   loadingScreen: { flex: 1, backgroundColor: COLORS.background, alignItems: 'center', justifyContent: 'center', gap: 12 },
   muted: { color: COLORS.muted, fontSize: 13, lineHeight: 20 },
+  configErrorText: { textAlign: 'center', paddingHorizontal: 24 },
+  otpActionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  linkTextDisabled: { color: COLORS.muted },
+  sectionNote: { color: COLORS.muted, fontSize: 11, lineHeight: 16, marginBottom: 12 },
+  loadMoreButton: { marginTop: 4, marginBottom: 14 },
   authScreen: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 22, justifyContent: 'center' },
+  authBackButton: { position: 'absolute', top: 54, left: 18, zIndex: 10, padding: 6 },
   authHero: { alignItems: 'center', marginBottom: 30 },
   logo: { width: 76, height: 76, borderRadius: 22, backgroundColor: '#073C78', borderWidth: 1, borderColor: '#197FE4', alignItems: 'center', justifyContent: 'center', marginBottom: 15 },
   logoGlyph: { color: '#42C6FF', fontSize: 48, fontWeight: '900', position: 'absolute', top: 1, right: 13 },
@@ -745,6 +855,8 @@ const styles = StyleSheet.create({
   headerIconText: { color: COLORS.text, fontSize: 26 },
   avatar: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#153B5E', alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: COLORS.blueLight, fontSize: 14 },
+  signInPill: { borderWidth: 1, borderColor: COLORS.blue, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 },
+  signInPillText: { color: COLORS.blueLight, fontSize: 12, fontWeight: '800' },
   searchRow: { paddingHorizontal: 16, paddingTop: 10 },
   searchInput: { backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10, color: COLORS.text },
   feedContent: { paddingHorizontal: 15, paddingBottom: 18 },

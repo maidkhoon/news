@@ -6,13 +6,13 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL
 const supabasePublishableKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 
-if (!supabaseUrl || !supabasePublishableKey) {
-  throw new Error(
-    'Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY. Copy mobile/.env.example to mobile/.env and fill in your Supabase values.'
-  )
-}
+// Surfaced as a screen instead of a thrown error so a missing .env produces a
+// readable in-app message rather than a blank bundle crash.
+export const supabaseConfigError = !supabaseUrl || !supabasePublishableKey
+  ? 'Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY. Copy mobile/.env.example to mobile/.env, fill in your Supabase values, and restart the dev server.'
+  : null
 
-export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
+export const supabase = createClient(supabaseUrl || 'https://placeholder.invalid', supabasePublishableKey || 'placeholder-key', {
   auth: {
     ...(Platform.OS !== 'web' ? { storage: AsyncStorage } : {}),
     autoRefreshToken: true,
