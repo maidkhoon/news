@@ -40,42 +40,20 @@ npm run check
 
 ## Connect Claude Code
 
-From the repository root, add this to the project's `.mcp.json` (or merge it into your existing file). Claude Code starts the process from the repository root:
+From the repository root, add this to the project's `.mcp.json` (or merge it into your existing file):
 
 ```json
 {
   "mcpServers": {
     "bazaarnexa": {
       "command": "node",
-      "args": ["./mcp-server/src/index.js"],
-      "env": {
-        "SUPABASE_URL": "https://YOUR_PROJECT.supabase.co",
-        "SUPABASE_ANON_KEY": "YOUR_PUBLIC_ANON_OR_PUBLISHABLE_KEY",
-        "BAZAARNEXA_ADMIN_EMAIL": "your-dedicated-admin@example.com",
-        "BAZAARNEXA_ADMIN_PASSWORD": "set-this-in-your-local-environment",
-        "BAZAARNEXA_API_URL": "https://news-api-egmd.onrender.com"
-      }
+      "args": ["./mcp-server/src/index.js"]
     }
   }
 }
 ```
 
-**Secret handling:** Prefer environment-variable references supported by your Claude Code version or run Claude Code in a shell where these variables are set. Avoid committing real values in `.mcp.json`. If you use literal values locally, ensure the file is gitignored and never share it. The server itself reads environment variables and `mcp-server/.env`; Claude Code does not automatically load that nested .env when launching from the repository root, so either export those variables in your shell or configure the MCP process to load `dotenv/config` from its own directory (see note below).
-
-### Easier local launch using a wrapper
-
-Run from the repo root with the environment loaded from the MCP folder:
-
-PowerShell:
-```powershell
-Get-Content .\mcp-server\.env | Where-Object { $_ -match '^\s*[^#][^=]*=' } | ForEach-Object {
-  $pair = $_ -split '=', 2
-  [Environment]::SetEnvironmentVariable($pair[0].Trim(), $pair[1].Trim(), 'Process')
-}
-claude
-```
-
-On macOS/Linux, export the variables in your shell before running `claude`. Do not print secrets in logs or commit shell history containing them.
+The MCP process explicitly loads `mcp-server/.env` by path, so Claude Code does not need secrets in its MCP config. The nested `.env` is ignored by Git. Never commit real credentials, place them in `.mcp.json`, or paste them into chat.
 
 ## Tools available to Claude Code
 
