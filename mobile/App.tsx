@@ -48,6 +48,7 @@ type MarketStock = { symbol: string; name: string; exchange: 'NSE' | 'BSE'; pric
 type MarketMovers = { exchange: 'NSE' | 'BSE'; count: number; gainers: MarketStock[]; losers: MarketStock[]; fetchedAt: string; dataTimestamp: string | null; cached: boolean }
 type TickerItem = { kind: 'crypto' | 'stock'; symbol: string; name: string; price: number; percentChange: number | null; currency: string; exchange: 'NSE' | 'BSE' | null; dataTimestamp: string | null }
 type MarketTicker = { items: TickerItem[]; fetchedAt: string; refreshSeconds: number; cached: boolean }
+type IndexQuote = { key: 'SENSEX' | 'NIFTY50'; label: string; value: number | null; change: number | null; percentChange: number | null; dataTimestamp: string | null }
 
 const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
 const TOPICS_STORAGE_KEY = 'bazaarnexa:briefing-topics'
@@ -72,7 +73,14 @@ Notifications.setNotificationHandler({
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://news-api-egmd.onrender.com').replace(/\/$/, '')
 const NAV_TABS: Tab[] = ['Home', 'Crypto', 'NSE', 'BSE', 'Cricket']
 const NAV_ICONS = ['⌂', '₿', '↗', '▥', '🏏']
-const FILTERS = ['All', 'India', 'Nifty 50', 'Sensex', 'Crypto', 'Cricket']
+const FILTERS = ['All', 'Indian Market', 'Crypto', 'Cricket']
+// BazaarNexa's market data provider (Indian API) exposes NSE/BSE top gainers & losers,
+// not index-level ticks. Until an index feed is added, both cards render an honest
+// "unavailable" state rather than a fabricated value — never invent numbers here.
+const INDIAN_INDICES: IndexQuote[] = [
+  { key: 'SENSEX', label: 'Sensex', value: null, change: null, percentChange: null, dataTimestamp: null },
+  { key: 'NIFTY50', label: 'Nifty 50', value: null, change: null, percentChange: null, dataTimestamp: null },
+]
 
 // Classifies Supabase auth errors so network, rate-limit, and WhatsApp provider
 // failures show distinct, actionable messages instead of a raw stack trace.
@@ -644,8 +652,10 @@ export default function App() {
     const chosen = tab === 'Crypto' || tab === 'Cricket' ? tab : filter
     if (chosen === 'Crypto') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('crypto') || a.categories?.name?.toLowerCase().includes('crypto'))
     else if (chosen === 'Cricket') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('cricket') || a.categories?.name?.toLowerCase().includes('cricket'))
-    else if (chosen === 'India') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('india') || a.categories?.name?.toLowerCase().includes('india'))
-    else if (chosen === 'Sensex' || chosen === 'Nifty 50') result = result.filter(a => a.title.toLowerCase().includes(chosen.toLowerCase()) || a.slug.toLowerCase().includes(chosen.toLowerCase()))
+    else if (chosen === 'Indian Market') result = result.filter(a =>
+      a.categories?.slug?.toLowerCase().includes('india') || a.categories?.name?.toLowerCase().includes('india') ||
+      a.title.toLowerCase().includes('sensex') || a.slug.toLowerCase().includes('sensex') ||
+      a.title.toLowerCase().includes('nifty') || a.slug.toLowerCase().includes('nifty'))
     if (search.trim()) result = result.filter(a => a.title.toLowerCase().includes(search.trim().toLowerCase()))
     return result
   }, [articles, filter, tab, search, briefingTopics])
@@ -806,7 +816,7 @@ export default function App() {
               </View>
               <View style={[styles.planCard, chosenPlan === 'BASIC' && styles.planCardSelected]}>
                 <View style={styles.planTitleRow}><Text style={styles.planName}>Basic</Text><Text style={styles.planPrice}>{basicPrice}</Text></View>
-                {['Daily market research', 'Nifty 50 & Sensex analysis', 'Crypto market analysis', 'Stock & sector research', 'Weekly and monthly reports', 'Ad-free reading'].map(item => <Text key={item} style={styles.planFeature}>✓  {item}</Text>)}
+                {['Daily market research', 'Indian Market analysis', 'Crypto market analysis', 'Stock & sector research', 'Weekly and monthly reports', 'Ad-free reading'].map(item => <Text key={item} style={styles.planFeature}>✓  {item}</Text>)}
                 <Pressable onPress={() => choosePlan('BASIC')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Choose Basic  →</Text></Pressable>
               </View>
               <View style={[styles.planCard, chosenPlan === 'PRO' && styles.planCardSelected]}>
@@ -871,7 +881,7 @@ export default function App() {
             <View style={styles.stateCard}>
               <Text style={styles.stateTitle}>Sign in required</Text>
               <Text style={styles.muted}>Notifications are tied to your BazaarNexa account. Sign in to see research alerts.</Text>
-              <Pressable onPress={openSignIn} style={styles.retryButton}><Text style={styles.retryText}>Sign in</Text></Pressable>
+              <Pressable onPress={openSignIn} style={styles.retryButton} accessibilityRole="button" accessibilityLabel="Sign in"><Text style={styles.retryText}>Sign in</Text></Pressable>
             </View>
           ) : (
             <>
@@ -912,7 +922,7 @@ export default function App() {
             <Pressable key={article.id} onPress={() => openArticle(article)} style={styles.articleCard}>
               {article.image_url ? <Image source={{ uri: article.image_url }} style={styles.articleImage} resizeMode="cover" /> : <View style={styles.articleImageFallback}><Text style={styles.fallbackGlyph}>↗</Text></View>}
               <View style={styles.articleCopy}><Text style={styles.articleTag}>{article.categories?.name || 'Research'}</Text><Text style={styles.articleTitle}>{article.title}</Text><Text style={styles.readMore}>Read article →</Text></View>
-              <Pressable onPress={() => setSavedIds(ids => ids.filter(id => id !== article.id))}><Text style={styles.bookmark}>✕</Text></Pressable>
+              <Pressable onPress={() => setSavedIds(ids => ids.filter(id => id !== article.id))} accessibilityRole="button" accessibilityLabel="Remove from saved"><Text style={styles.bookmark}>✕</Text></Pressable>
             </Pressable>
           ))}
         </ScrollView>
@@ -937,12 +947,12 @@ export default function App() {
       <View style={styles.header}>
         <View style={styles.brandMark}><Text style={styles.brandMarkText}>↗</Text></View>
         <View style={styles.headerCopy}><Text style={styles.headerTitle}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text><Text style={styles.headerSub}>INDIA & CRYPTO RESEARCH</Text></View>
-        <Pressable onPress={() => { setSearchOpen(open => !open); setSearch('') }} style={styles.headerIcon}><Text style={styles.headerIconText}>⌕</Text></Pressable>
-        <Pressable onPress={() => { setScreen('notifications'); if (session) void loadNotifications() }} style={styles.headerIcon}><Text style={styles.headerIconText}>♧</Text></Pressable>
+        <Pressable onPress={() => { setSearchOpen(open => !open); setSearch('') }} style={styles.headerIcon} accessibilityRole="button" accessibilityLabel="Search"><Text style={styles.headerIconText}>⌕</Text></Pressable>
+        <Pressable onPress={() => { setScreen('notifications'); if (session) void loadNotifications() }} style={styles.headerIcon} accessibilityRole="button" accessibilityLabel="Notifications"><Text style={styles.headerIconText}>♧</Text></Pressable>
         {session ? (
-          <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || 'member'), [{ text: 'Close' }, { text: 'Saved articles', onPress: () => setScreen('saved') }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar}><Text style={styles.avatarText}>●</Text></Pressable>
+          <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || 'member'), [{ text: 'Close' }, { text: 'Saved articles', onPress: () => setScreen('saved') }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar} accessibilityRole="button" accessibilityLabel="Account menu"><Text style={styles.avatarText}>●</Text></Pressable>
         ) : (
-          <Pressable onPress={openSignIn} style={styles.signInPill}><Text style={styles.signInPillText}>Sign in</Text></Pressable>
+          <Pressable onPress={openSignIn} style={styles.signInPill} accessibilityRole="button" accessibilityLabel="Sign in"><Text style={styles.signInPillText}>Sign in</Text></Pressable>
         )}
       </View>
       {searchOpen ? <View style={styles.searchRow}><TextInput autoFocus value={search} onChangeText={setSearch} placeholder="Search research…" placeholderTextColor={COLORS.muted} style={styles.searchInput} /></View> : null}
@@ -962,7 +972,7 @@ export default function App() {
               <View style={styles.articleTopline}><Text style={[styles.articleTag, index % 3 === 1 && styles.articleTagPurple]}>{article.categories?.name || 'Research'}</Text><Text style={styles.articleTime}>{readableDate(article.published_at)}</Text></View>
               <Text numberOfLines={3} style={styles.articleTitle}>{article.title}</Text>
               <Text numberOfLines={2} style={styles.articleSummary}>In-depth research, key developments and context to help you understand the story.</Text>
-              <View style={styles.articleBottom}><Text style={styles.readMore}>Read article  →</Text><Pressable hitSlop={10} onPress={() => setSavedIds(ids => ids.includes(article.id) ? ids.filter(id => id !== article.id) : [...ids, article.id])}><Text style={styles.bookmark}>{savedIds.includes(article.id) ? '🔖' : '♧'}</Text></Pressable></View>
+              <View style={styles.articleBottom}><Text style={styles.readMore}>Read article  →</Text><Pressable hitSlop={10} onPress={() => setSavedIds(ids => ids.includes(article.id) ? ids.filter(id => id !== article.id) : [...ids, article.id])} accessibilityRole="button" accessibilityLabel={savedIds.includes(article.id) ? 'Remove from saved' : 'Save article'}><Text style={styles.bookmark}>{savedIds.includes(article.id) ? '🔖' : '♧'}</Text></Pressable></View>
             </View>
           </Pressable>
         )}
@@ -970,7 +980,7 @@ export default function App() {
           <>
             {(tab === 'NSE' || tab === 'BSE') ? (
               <View style={styles.moversPanel}>
-                <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>INDIAN EQUITY MARKETS</Text><Text style={styles.sectionTitle}>{tab} Top Movers</Text></View><Pressable onPress={() => void loadMarketMovers(tab)} style={styles.retryButton}><Text style={styles.retryText}>Refresh</Text></Pressable></View>
+                <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>INDIAN EQUITY MARKETS</Text><Text style={styles.sectionTitle}>{tab} Top Movers</Text></View><Pressable onPress={() => void loadMarketMovers(tab)} style={styles.retryButton} accessibilityRole="button" accessibilityLabel={`Refresh ${tab} movers`}><Text style={styles.retryText}>Refresh</Text></Pressable></View>
                 <View style={styles.moverTabs}>
                   <Pressable onPress={() => setMarketView('gainers')} style={[styles.moverTab, marketView === 'gainers' && styles.moverTabActive]}><Text style={[styles.moverTabText, marketView === 'gainers' && styles.moverTabTextActive]}>Top Gainers</Text></Pressable>
                   <Pressable onPress={() => setMarketView('losers')} style={[styles.moverTab, marketView === 'losers' && styles.moverTabActive]}><Text style={[styles.moverTabText, marketView === 'losers' && styles.moverTabTextActive]}>Top Losers</Text></Pressable>
@@ -989,8 +999,22 @@ export default function App() {
                 <Text style={styles.moverDisclaimer}>Market data may be delayed by the provider. For research only—not investment advice.</Text>
               </View>
             ) : null}
+            <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>INDIAN INDICES</Text><Text style={styles.sectionTitle}>Indian Market</Text></View></View>
+            <View style={styles.indexPanel}>
+              {INDIAN_INDICES.map(index => (
+                <View key={index.key} style={styles.indexRow}>
+                  <Text style={styles.indexName}>{index.label}</Text>
+                  {index.value !== null ? (
+                    <View style={styles.indexValues}>
+                      <Text style={styles.indexValue}>{index.value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Text>
+                      {index.percentChange !== null ? <Text style={[styles.moverChange, index.percentChange >= 0 ? styles.moverPositive : styles.moverNegative]}>{index.percentChange >= 0 ? '+' : ''}{index.percentChange.toFixed(2)}%</Text> : null}
+                    </View>
+                  ) : <Text style={styles.indexUnavailable}>Index data unavailable</Text>}
+                </View>
+              ))}
+            </View>
+            <Text style={styles.moverDisclaimer}>BazaarNexa's market data provider currently publishes NSE/BSE top movers, not live index levels — see the NSE and BSE tabs for real-time stock data.</Text>
             <View style={styles.marketStrip}>
-              <View style={styles.marketTile}><Text style={styles.marketEmoji}>🇮🇳</Text><View><Text style={styles.marketName}>INDIA</Text><Text style={styles.marketValue}>Market research</Text></View><Text style={styles.marketArrow}>↗</Text></View>
               <View style={styles.marketTile}><Text style={styles.marketEmoji}>₿</Text><View><Text style={styles.marketName}>CRYPTO</Text><Text style={styles.marketValue}>Digital assets</Text></View><Text style={styles.marketArrow}>↗</Text></View>
             </View>
             <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>YOUR DAILY BRIEFING</Text><Text style={styles.sectionTitle}>Market Insight</Text></View><Pressable onPress={() => setScreen('plans')} style={styles.premiumPill}><Text style={styles.premiumText}>{activeSubscription ? '♛ Premium Active' : '♛ Premium'}</Text></Pressable></View>
@@ -1016,7 +1040,7 @@ export default function App() {
               {FILTERS.map(item => <Pressable key={item} onPress={() => { setFilter(item); setTab(item === 'Crypto' ? 'Crypto' : item === 'Cricket' ? 'Cricket' : 'Home') }} style={[styles.filterPill, filter === item && tab === 'Home' && styles.filterPillActive]}><Text style={[styles.filterText, filter === item && tab === 'Home' && styles.filterTextActive]}>{item}</Text></Pressable>)}
             </ScrollView>
             {feedLoading && articles.length === 0 ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading the newsroom…</Text></View> : null}
-            {feedError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Couldn’t load research</Text><Text style={styles.muted}>{feedError}</Text><Pressable onPress={() => loadFeed()} style={styles.retryButton}><Text style={styles.retryText}>Try again</Text></Pressable></View> : null}
+            {feedError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Couldn’t load research</Text><Text style={styles.muted}>{feedError}</Text><Pressable onPress={() => loadFeed()} style={styles.retryButton} accessibilityRole="button" accessibilityLabel="Try again"><Text style={styles.retryText}>Try again</Text></Pressable></View> : null}
             {!feedLoading && !feedError && visibleArticles.length === 0 ? (
               tab === 'Cricket' && !hasCricketCategory ? (
                 <View style={styles.stateCard}><Text style={styles.stateTitle}>Cricket coverage isn’t available yet</Text><Text style={styles.muted}>BazaarNexa hasn’t published a Cricket category yet. Check back soon.</Text></View>
@@ -1038,7 +1062,7 @@ export default function App() {
         }
       />
       <View style={styles.bottomNav}>
-        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' || item === 'Cricket' ? item : item === 'Home' || item === 'NSE' || item === 'BSE' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{NAV_ICONS[index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
+        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' || item === 'Cricket' ? item : item === 'Home' || item === 'NSE' || item === 'BSE' ? 'All' : item) }} style={styles.navItem} accessibilityRole="tab" accessibilityLabel={item} accessibilityState={{ selected: tab === item }}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{NAV_ICONS[index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
       </View>
     </SafeAreaView>
   )
@@ -1135,6 +1159,12 @@ const styles = StyleSheet.create({
   searchRow: { paddingHorizontal: 16, paddingTop: 10 },
   searchInput: { backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10, color: COLORS.text },
   feedContent: { paddingHorizontal: 15, paddingBottom: 18 },
+  indexPanel: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 16, padding: 13, marginBottom: 14 },
+  indexRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  indexName: { color: COLORS.text, fontSize: 14, fontWeight: '800' },
+  indexValues: { alignItems: 'flex-end' },
+  indexValue: { color: COLORS.text, fontSize: 14, fontWeight: '800' },
+  indexUnavailable: { color: COLORS.muted, fontSize: 12, fontStyle: 'italic' },
   marketStrip: { flexDirection: 'row', gap: 9, marginTop: 15, marginBottom: 22 },
   marketTile: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1, borderRadius: 13, padding: 11 },
   marketEmoji: { fontSize: 21 },
