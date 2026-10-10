@@ -393,7 +393,28 @@ function App() {
             </table>
           </div>
           <div className="table-footer"><span>Showing <strong>{filteredArticles.length}</strong> of <strong>{articles.length}</strong> articles</span><span>INDIA <b>·</b> CRYPTO</span></div>
-        </section>
+        </section>}
+
+        {page === "categories" && <section className="content-card">
+          <div className="table-heading"><div><h2>All categories</h2><p className="muted">Manage the sections used by articles and mobile app feeds.</p></div><button className="secondary-button" onClick={loadData} disabled={loading}>↻ <span>Refresh</span></button></div>
+          <div className="table-wrap">
+            <table><thead><tr><th>CATEGORY NAME</th><th>SLUG</th><th>ARTICLES</th><th>UPDATED</th><th><span className="sr-only">Actions</span></th></tr></thead>
+              <tbody>
+                {loading ? <tr><td colSpan="5" className="empty-state"><div className="spinner" />Loading categories…</td></tr> :
+                  categories.length === 0 ? <tr><td colSpan="5" className="empty-state"><div className="empty-icon">◈</div><strong>No categories yet</strong><span>Create a category before publishing articles.</span><button className="secondary-button" onClick={openCreateCategory}>＋ Create category</button></td></tr> :
+                  categories.map((category) => <tr key={category.id}>
+                    <td><strong>{category.name}</strong></td>
+                    <td><code className="category-slug">{category.slug}</code></td>
+                    <td><span className="category-pill">{articles.filter((article) => article.category_id === category.id).length} articles</span></td>
+                    <td className="date-cell">{category.updated_at ? new Date(category.updated_at).toLocaleDateString() : "—"}</td>
+                    <td><div className="row-actions"><button className="icon-button" title="Edit category" aria-label={`Edit ${category.name}`} onClick={() => openEditCategory(category)}>✎</button><button className="icon-button danger-action" title="Delete category" aria-label={`Delete ${category.name}`} onClick={() => deleteCategory(category)}>⌫</button></div></td>
+                  </tr>)
+                }
+              </tbody>
+            </table>
+          </div>
+          <div className="table-footer"><span><strong>{categories.length}</strong> categories</span><span>Slugs power API filters</span></div>
+        </section>}
         <footer className="page-footer"><span>NEWSROOM ADMIN</span><span>Write with clarity. Publish with confidence.</span></footer>
       </main>
 
