@@ -4,6 +4,16 @@ import { supabase } from "../lib/supabase.js";
 const router = Router();
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
 const MODEL = process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct";
+const requestWindows = new Map();
+
+function overBriefingLimit(key) {
+  const now = Date.now();
+  const previous = requestWindows.get(key) || [];
+  const recent = previous.filter(time => now - time < 60_000);
+  recent.push(now);
+  requestWindows.set(key, recent);
+  return recent.length > 8;
+}
 
 function significantWords(value) {
   return new Set(String(value || "").toLowerCase()
@@ -14,6 +24,8 @@ function significantWords(value) {
 }
 
 router.post("/summary", async (req, res) => {
+  const clientKey = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").split(",")[0].trim();
+  if (overBriefingLimit(clientKey)) return res.status(429).json({ error: "Too many briefing requests. Please wait a minute and try again." });
   const slug = typeof req.body?.slug === "string" ? req.body.slug.trim().slice(0, 180) : "";
   if (!slug) return res.status(400).json({ error: "A valid article slug is required." });
 
