@@ -1,0 +1,17 @@
+{
+  "name": "@bazaarnexa/local-claude-code-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local stdio MCP server for draft-only BazaarNexa article workflows.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "zod": "^3.25.0"
+  }
+}
