@@ -43,6 +43,8 @@ type NewsNotification = { id: string; title: string; message: string; article_id
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
 
 const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
+const TOPICS_STORAGE_KEY = 'bazaarnexa:briefing-topics'
+const DEFAULT_TOPICS = ['India', 'Crypto', 'Cricket']
 const PLAY_PRODUCTS = {
   BASIC_MONTHLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_BASIC_MONTHLY_PRODUCT_ID || '',
   BASIC_YEARLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_BASIC_YEARLY_PRODUCT_ID || '',
@@ -116,6 +118,13 @@ export default function App() {
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
   const [savedIds, setSavedIds] = useState<string[]>([])
   const [savedLoaded, setSavedLoaded] = useState(false)
+  const [briefingTopics, setBriefingTopics] = useState<string[]>(DEFAULT_TOPICS)
+  const [topicsLoaded, setTopicsLoaded] = useState(false)
+  const [briefingSummary, setBriefingSummary] = useState<{ bullets: string[]; keyTerms: { term: string; explanation: string }[]; sourceUrl?: string; sourceName?: string } | null>(null)
+  const [briefingLoading, setBriefingLoading] = useState(false)
+  const [briefingError, setBriefingError] = useState('')
+  const [relatedStories, setRelatedStories] = useState<Article[]>([])
+  const [relatedLoading, setRelatedLoading] = useState(false)
   const [screen, setScreen] = useState<AppScreen>('home')
   const [notificationItems, setNotificationItems] = useState<NewsNotification[]>([])
   const [notificationsLoading, setNotificationsLoading] = useState(false)
@@ -125,6 +134,13 @@ export default function App() {
   const finishTransactionRef = useRef<((args: any) => Promise<any>) | null>(null)
 
   useEffect(() => {
+    AsyncStorage.getItem(TOPICS_STORAGE_KEY).then(value => {
+      if (value) {
+        const parsed = JSON.parse(value)
+        if (Array.isArray(parsed)) setBriefingTopics(parsed.filter(topic => typeof topic === 'string'))
+      }
+    }).catch(() => undefined).finally(() => setTopicsLoaded(true))
+
     AsyncStorage.getItem(SAVED_STORAGE_KEY).then(value => {
       if (value) {
         const parsed = JSON.parse(value)
@@ -154,12 +170,12 @@ export default function App() {
     try {
       setAuthLoading(true)
       const formattedPhone = normalizedPhone()
-      const { error } = await supabase.auth.signInWithOtp({ phone: formattedPhone })
+      const { error } = await supabase.auth.signInWithOtp({ phone: formattedPhone, options: { channel: 'whatsapp' } })
       if (error) throw error
       setStep('otp')
       setOtp('')
       setResendCooldown(30)
-      Alert.alert('OTP sent', `We sent a 6-digit OTP to ${formattedPhone}.`)
+      Alert.alert('WhatsApp OTP requested', `Check WhatsApp on ${formattedPhone} for your 6-digit code. If it does not arrive, verify WhatsApp is configured in Supabase Auth.`)
     } catch (error) {
       Alert.alert('Unable to send OTP', describeAuthError(error))
     } finally {
@@ -229,6 +245,42 @@ export default function App() {
       setLoadingMore(false)
     }
   }, [])
+
+  const loadBriefing = async (article: Article) => {
+    setBriefingLoading(true)
+    setBriefingError('')
+    setBriefingSummary(null)
+    try {
+      const response = await fetch(`${API_BASE}/api/insights/summary`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: article.slug }),
+      })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.message || json.error || 'Unable to generate the briefing.')
+      setBriefingSummary(json.data)
+    } catch (error) {
+      setBriefingError(error instanceof Error ? error.message : 'Unable to generate the briefing.')
+    } finally { setBriefingLoading(false) }
+  }
+
+  const loadRelatedStories = async (article: Article) => {
+    setRelatedLoading(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/insights/context/${encodeURIComponent(article.slug)}`)
+      const json = await response.json()
+      if (response.ok) setRelatedStories(Array.isArray(json.data) ? json.data : [])
+      else setRelatedStories([])
+    } catch { setRelatedStories([]) }
+    finally { setRelatedLoading(false) }
+  }
+
+  const toggleBriefingTopic = (topic: string) => {
+    setBriefingTopics(current => {
+      const next = current.includes(topic) ? current.filter(item => item !== topic) : [...current, topic]
+      AsyncStorage.setItem(TOPICS_STORAGE_KEY, JSON.stringify(next)).catch(() => undefined)
+      return next
+    })
+  }
 
   const loadMoreArticles = useCallback(() => {
     if (hasNextPage && !loadingMore && !feedLoading) void loadFeed({ nextPage: page + 1 })
@@ -462,6 +514,10 @@ export default function App() {
 
   const openArticle = async (article: Article) => {
     setSelectedArticle(article)
+    setBriefingSummary(null)
+    setBriefingError('')
+    setRelatedStories([])
+    void loadRelatedStories(article)
     try {
       const headers: Record<string, string> = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}
       const response = await fetch(`${API_BASE}/api/articles/${encodeURIComponent(article.slug)}`, { headers })
@@ -519,6 +575,9 @@ export default function App() {
 
   const visibleArticles = useMemo(() => {
     let result = articles
+    if (filter === 'All' && tab === 'Home' && briefingTopics.length > 0) {
+      result = result.filter(article => briefingTopics.some(topic => `${article.categories?.name || ''} ${article.categories?.slug || ''} ${article.title}`.toLowerCase().includes(topic.toLowerCase())))
+    }
     const chosen = tab === 'Crypto' || tab === 'Cricket' || tab === 'Sensex' || tab === 'Nifty 50' ? tab : filter
     if (chosen === 'Crypto') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('crypto') || a.categories?.name?.toLowerCase().includes('crypto'))
     else if (chosen === 'Cricket') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('cricket') || a.categories?.name?.toLowerCase().includes('cricket'))
@@ -526,7 +585,7 @@ export default function App() {
     else if (chosen === 'Sensex' || chosen === 'Nifty 50') result = result.filter(a => a.title.toLowerCase().includes(chosen.toLowerCase()) || a.slug.toLowerCase().includes(chosen.toLowerCase()))
     if (search.trim()) result = result.filter(a => a.title.toLowerCase().includes(search.trim().toLowerCase()))
     return result
-  }, [articles, filter, tab, search])
+  }, [articles, filter, tab, search, briefingTopics])
 
   const signOut = async () => {
     await supabase.auth.signOut()
@@ -614,6 +673,31 @@ export default function App() {
           <Text style={styles.detailTitle}>{selectedArticle.title}</Text>
           <Text style={styles.articleMeta}>{readableDate(selectedArticle.published_at)}  ·  {selectedArticle.access_type === 'PREMIUM' ? 'Premium' : 'Free'}</Text>
           <Text style={styles.articleBody}>{selectedArticle.content || 'The full article content is not available yet.'}</Text>
+          <View style={styles.insightPanel}>
+            <Text style={styles.insightTitle}>AI-powered briefing</Text>
+            <Text style={styles.muted}>A concise, source-linked summary. AI output may contain errors; check the original reporting.</Text>
+            <Pressable onPress={() => void loadBriefing(selectedArticle)} style={[styles.primaryButton, briefingLoading && styles.disabled]} disabled={briefingLoading}>
+              {briefingLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Summarize this story ✦</Text>}
+            </Pressable>
+            {briefingError ? <Text style={styles.insightError}>{briefingError}</Text> : null}
+            {briefingSummary ? <>
+              <Text style={styles.insightSubheading}>Key points</Text>
+              {briefingSummary.bullets.map((bullet, index) => <Text key={`${index}-${bullet}`} style={styles.insightBullet}>•  {bullet}</Text>)}
+              {briefingSummary.keyTerms.length ? <Text style={styles.insightSubheading}>Key terms</Text> : null}
+              {briefingSummary.keyTerms.map(item => <Text key={item.term} style={styles.insightBullet}><Text style={styles.insightTerm}>{item.term}: </Text>{item.explanation}</Text>)}
+              {briefingSummary.sourceUrl ? <Text style={styles.insightSource}>Original source: {briefingSummary.sourceName || 'Publisher'} · {briefingSummary.sourceUrl}</Text> : null}
+              <Text style={styles.muted}>AI-generated summary, not investment advice.</Text>
+            </> : null}
+          </View>
+          <View style={styles.insightPanel}>
+            <Text style={styles.insightTitle}>Story context & source comparison</Text>
+            <Text style={styles.muted}>Related coverage in BazaarNexa, ordered by publication date.</Text>
+            {relatedLoading ? <ActivityIndicator color={COLORS.blue} /> : relatedStories.length ? relatedStories.map(story => <Pressable key={story.id} onPress={() => void openArticle(story)} style={styles.relatedStory}>
+              <Text style={styles.articleTag}>{story.categories?.name || 'Research'}</Text>
+              <Text style={styles.relatedTitle}>{story.title}</Text>
+              <Text style={styles.articleTime}>{readableDate(story.published_at)} · {story.slug === selectedArticle.slug ? 'Current story' : 'Related coverage'}</Text>
+            </Pressable>) : <Text style={styles.muted}>No related coverage found yet. More sources will appear as the newsroom grows.</Text>}
+          </View>
           <Text style={styles.disclaimer}>For research and educational purposes only. Not investment advice.</Text>
         </ScrollView>
       </SafeAreaView>
@@ -826,6 +910,11 @@ export default function App() {
               <View style={styles.heroEmpty}><Text style={styles.heroEmptyIcon}>▥</Text><Text style={styles.heroEmptyTitle}>Research that brings clarity</Text><Text style={styles.heroEmptyText}>Your latest published market insights will appear here.</Text></View>
             )}
             <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>CURATED FOR YOU</Text><Text style={styles.sectionTitle}>Latest Articles</Text></View><Text style={styles.articleCount}>{articles.length} articles</Text></View>
+            <View style={styles.topicPanel}>
+              <Text style={styles.topicTitle}>Personalize your daily briefing</Text>
+              <Text style={styles.muted}>Choose topics to focus your feed. Your choices are saved on this device.</Text>
+              <View style={styles.topicChoices}>{DEFAULT_TOPICS.map(topic => <Pressable key={topic} onPress={() => toggleBriefingTopic(topic)} style={[styles.filterPill, briefingTopics.includes(topic) && styles.filterPillActive]}><Text style={[styles.filterText, briefingTopics.includes(topic) && styles.filterTextActive]}>{briefingTopics.includes(topic) ? '✓ ' : '+ '}{topic}</Text></Pressable>)}</View>
+            </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
               {FILTERS.map(item => <Pressable key={item} onPress={() => { setFilter(item); setTab(item === 'Crypto' ? 'Crypto' : item === 'Cricket' ? 'Cricket' : 'Home') }} style={[styles.filterPill, filter === item && tab === 'Home' && styles.filterPillActive]}><Text style={[styles.filterText, filter === item && tab === 'Home' && styles.filterTextActive]}>{item}</Text></Pressable>)}
             </ScrollView>
@@ -982,6 +1071,18 @@ const styles = StyleSheet.create({
   backText: { color: COLORS.blueLight, fontSize: 15, fontWeight: '700' },
   detailBrand: { color: COLORS.text, fontWeight: '800', fontSize: 16 },
   detailContent: { padding: 18, paddingBottom: 35 },
+  insightPanel: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 15, padding: 15, marginTop: 18, gap: 10 },
+  insightTitle: { color: COLORS.text, fontSize: 17, fontWeight: '900' },
+  insightSubheading: { color: COLORS.blueLight, fontSize: 13, fontWeight: '900', marginTop: 6 },
+  insightBullet: { color: '#D0DDEC', fontSize: 13, lineHeight: 20 },
+  insightTerm: { color: COLORS.text, fontWeight: '900' },
+  insightSource: { color: COLORS.blueLight, fontSize: 11, lineHeight: 17 },
+  insightError: { color: '#FF9E9E', fontSize: 12, lineHeight: 18 },
+  relatedStory: { borderTopWidth: 1, borderTopColor: COLORS.border, paddingTop: 10, gap: 5 },
+  relatedTitle: { color: COLORS.text, fontSize: 13, fontWeight: '800', lineHeight: 19 },
+  topicPanel: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, padding: 14, marginBottom: 15, gap: 8 },
+  topicTitle: { color: COLORS.text, fontSize: 15, fontWeight: '900' },
+  topicChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 3 },
   plansContent: { padding: 18, paddingBottom: 38 },
   plansHero: { backgroundColor: '#0C2B4C', borderWidth: 1, borderColor: COLORS.border, borderRadius: 20, padding: 20, marginBottom: 17, gap: 10 },
   plansTitle: { color: COLORS.text, fontSize: 25, fontWeight: '900', lineHeight: 31, marginBottom: 7 },
