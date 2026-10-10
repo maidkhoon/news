@@ -1,0 +1,31 @@
+name: BazaarNexa MCP validation
+
+on:
+  pull_request:
+    paths:
+      - "tools/bazaarnexa-mcp/**"
+      - ".github/workflows/bazaarnexa-mcp.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "tools/bazaarnexa-mcp/**"
+      - ".github/workflows/bazaarnexa-mcp.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/bazaarnexa-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --package-lock-only
+      - run: npm install
+      - run: npm run check
