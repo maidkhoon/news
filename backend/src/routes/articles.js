@@ -1,14 +1,11 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
+import { getAuthenticatedUser, getBearerToken } from "../lib/auth.js";
 
 const router = Router();
 
 async function currentUser(req) {
-  const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!token) return null;
-  const { data, error } = await supabase.auth.getUser(token);
-  return error ? null : data.user || null;
+  return getAuthenticatedUser(getBearerToken(req));
 }
 
 async function hasActiveSubscription(userId) {
