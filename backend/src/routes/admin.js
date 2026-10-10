@@ -7,7 +7,7 @@ const router = Router();
 
 router.use(requireAdmin);
 
-const articleFields = "id,title,slug,image_url,content,access_type,status,published_at,category_id,created_by,created_at,updated_at,categories(name,slug)";
+const articleFields = "id,title,slug,image_url,content,source_url,source_name,access_type,status,published_at,category_id,created_by,created_at,updated_at,categories(name,slug)";
 
 async function notifyPublished(article) {
   const categoryName = article.categories?.name || "Market Research";
@@ -30,6 +30,15 @@ function makeSlug(value) {
     .slice(0, 140);
 }
 
+function isHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function validateArticle(body, { partial = false } = {}) {
   const errors = [];
   const required = ["title", "content", "category_id"];
@@ -46,6 +55,8 @@ function validateArticle(body, { partial = false } = {}) {
   if (body.content !== undefined && (typeof body.content !== "string" || !body.content.trim())) errors.push("content");
   if (body.category_id !== undefined && (typeof body.category_id !== "string" || !body.category_id.trim())) errors.push("category_id");
   if (body.image_url !== undefined && body.image_url !== null && typeof body.image_url !== "string") errors.push("image_url");
+  if (body.source_url !== undefined && body.source_url !== null && (typeof body.source_url !== "string" || !isHttpUrl(body.source_url))) errors.push("source_url");
+  if (body.source_name !== undefined && body.source_name !== null && (typeof body.source_name !== "string" || body.source_name.length > 200)) errors.push("source_name");
   if (body.access_type !== undefined && !["FREE", "PREMIUM"].includes(body.access_type)) errors.push("access_type");
   if (body.status !== undefined && !["DRAFT", "PUBLISHED", "UNPUBLISHED"].includes(body.status)) errors.push("status");
 
@@ -93,6 +104,8 @@ router.post("/articles", async (req, res) => {
     category_id: req.body.category_id,
     created_by: req.user.id,
     image_url: req.body.image_url || null,
+    source_url: req.body.source_url || null,
+    source_name: req.body.source_name || null,
     access_type: req.body.access_type || "FREE",
     status,
     published_at: status === "PUBLISHED" ? new Date().toISOString() : null
@@ -121,7 +134,7 @@ router.patch("/articles/:id", async (req, res) => {
   const errors = validateArticle(body, { partial: true });
   if (errors.length) return res.status(400).json({ error: "Invalid article fields", fields: errors });
 
-  const allowed = ["title", "slug", "image_url", "content", "access_type", "status", "category_id"];
+  const allowed = ["title", "slug", "image_url", "content", "source_url", "source_name", "access_type", "status", "category_id"];
   const payload = {};
 
   for (const field of allowed) {

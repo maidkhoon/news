@@ -6,12 +6,14 @@ on:
     paths:
       - "mobile/**"
       - "backend/**"
+      - "mcp-server/**"
       - ".github/workflows/validate.yml"
   push:
     branches: [main]
     paths:
       - "mobile/**"
       - "backend/**"
+      - "mcp-server/**"
       - ".github/workflows/validate.yml"
 
 jobs:
@@ -42,4 +44,18 @@ jobs:
           node-version: 22
       - run: npm install
       - run: node --check src/server.js
+      - run: node --check src/routes/admin.js
       - run: node --check src/routes/insights.js
+
+  mcp-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run check
