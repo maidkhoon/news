@@ -46,6 +46,8 @@ type NewsNotification = { id: string; title: string; message: string; article_id
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
 type MarketStock = { symbol: string; name: string; exchange: 'NSE' | 'BSE'; price: number; change: number | null; percentChange: number; volume: number | null; dataTimestamp: string | null }
 type MarketMovers = { exchange: 'NSE' | 'BSE'; count: number; gainers: MarketStock[]; losers: MarketStock[]; fetchedAt: string; dataTimestamp: string | null; cached: boolean }
+type TickerItem = { kind: 'crypto' | 'stock'; symbol: string; name: string; price: number; percentChange: number | null; currency: string; exchange: 'NSE' | 'BSE' | null; dataTimestamp: string | null }
+type MarketTicker = { items: TickerItem[]; fetchedAt: string; refreshSeconds: number; cached: boolean }
 
 const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
 const TOPICS_STORAGE_KEY = 'bazaarnexa:briefing-topics'
@@ -120,6 +122,8 @@ export default function App() {
   const [marketLoading, setMarketLoading] = useState(false)
   const [marketError, setMarketError] = useState('')
   const [marketView, setMarketView] = useState<'gainers' | 'losers'>('gainers')
+  const [ticker, setTicker] = useState<MarketTicker | null>(null)
+  const [tickerUpdatedAt, setTickerUpdatedAt] = useState('')
   const [filter, setFilter] = useState('All')
   const [tab, setTab] = useState<Tab>('Home')
   const [search, setSearch] = useState('')
@@ -271,6 +275,24 @@ export default function App() {
   useEffect(() => {
     if (tab === 'NSE' || tab === 'BSE') void loadMarketMovers(tab)
   }, [tab, loadMarketMovers])
+
+  const loadTicker = useCallback(async () => {
+    try {
+      const response = await fetch(API_BASE + '/api/market/ticker')
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.message || 'Ticker unavailable')
+      setTicker(json as MarketTicker)
+      setTickerUpdatedAt(new Date(json.fetchedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
+    } catch {
+      // Keep the last successful ticker visible if a refresh fails.
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadTicker()
+    const interval = setInterval(() => void loadTicker(), 60_000)
+    return () => clearInterval(interval)
+  }, [loadTicker])
 
   const loadBriefing = async (article: Article) => {
     setBriefingLoading(true)
@@ -886,6 +908,17 @@ export default function App() {
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+      <View style={styles.tickerBar}>
+        <Text style={styles.tickerLabel}>LIVE</Text>
+        {ticker?.items?.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tickerContent}>
+          {[...ticker.items, ...ticker.items].map((item, index) => <View key={item.kind + '-' + item.exchange + '-' + item.symbol + '-' + index} style={styles.tickerItem}>
+            <Text style={styles.tickerSymbol}>{item.symbol}{item.exchange ? ' · ' + item.exchange : ''}</Text>
+            <Text style={styles.tickerPrice}>{item.currency === 'INR' ? '₹' : ''}{item.price.toLocaleString('en-IN', { maximumFractionDigits: item.price < 100 ? 2 : 0 })}</Text>
+            {item.percentChange !== null ? <Text style={[styles.tickerChange, item.percentChange >= 0 ? styles.moverPositive : styles.moverNegative]}>{item.percentChange >= 0 ? '+' : ''}{item.percentChange.toFixed(2)}%</Text> : null}
+            <Text style={styles.tickerSeparator}>◆</Text>
+          </View>)}
+        </ScrollView> : <Text style={styles.tickerLoading}>Loading market data…</Text>}
+      </View>
       <View style={styles.header}>
         <View style={styles.brandMark}><Text style={styles.brandMarkText}>↗</Text></View>
         <View style={styles.headerCopy}><Text style={styles.headerTitle}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text><Text style={styles.headerSub}>INDIA & CRYPTO RESEARCH</Text></View>
@@ -1062,6 +1095,15 @@ const styles = StyleSheet.create({
   linkText: { color: COLORS.blueLight, fontWeight: '700' },
   legal: { color: '#829BB6', fontSize: 11, textAlign: 'center', lineHeight: 17, marginTop: 18 },
   disclaimer: { color: '#718AA6', fontSize: 10, textAlign: 'center', lineHeight: 16, marginVertical: 18, paddingHorizontal: 8 },
+  tickerBar: { height: 34, flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C1220', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' },
+  tickerLabel: { color: '#2ED59A', fontSize: 9, fontWeight: '900', letterSpacing: 1, paddingHorizontal: 10 },
+  tickerContent: { alignItems: 'center', paddingRight: 12 },
+  tickerItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, height: 34 },
+  tickerSymbol: { color: '#CBD5E1', fontSize: 10, fontWeight: '800' },
+  tickerPrice: { color: '#F8FAFC', fontSize: 10, fontWeight: '700' },
+  tickerChange: { fontSize: 10, fontWeight: '800' },
+  tickerSeparator: { color: '#334155', fontSize: 7, marginLeft: 5 },
+  tickerLoading: { color: '#64748B', fontSize: 10, flex: 1, textAlign: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#112A43', gap: 9 },
   brandMark: { width: 39, height: 39, borderRadius: 11, backgroundColor: '#0752A2', alignItems: 'center', justifyContent: 'center' },
   brandMarkText: { color: '#49D3FF', fontSize: 32, fontWeight: '900', marginTop: -4 },
