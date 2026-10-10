@@ -93,7 +93,7 @@ server.registerTool(
       content: z.string().trim().min(1).optional(),
       category_id: z.string().uuid().optional(),
       slug: z.string().trim().max(180).optional(),
-      image_url: z.string().url().nullable().optional(),
+      image_url: z.string().url().refine((value) => ["http:", "https:"].includes(new URL(value).protocol), "image_url must use HTTP or HTTPS").nullable().optional(),
       access_type: z.enum(["FREE", "PREMIUM"]).optional()
     }
   },
