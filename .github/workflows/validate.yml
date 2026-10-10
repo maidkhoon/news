@@ -1,0 +1,47 @@
+name: Validate BazaarNexa
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - "backend/**"
+      - ".github/workflows/validate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - "backend/**"
+      - ".github/workflows/validate.yml"
+
+jobs:
+  mobile-typecheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+
+  backend-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: node --check src/server.js
+      - run: node --check src/routes/insights.js
