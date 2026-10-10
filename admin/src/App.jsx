@@ -150,6 +150,7 @@ function App() {
   function openCreate() {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, category_id: categories[0]?.id || "" });
+    setImagePreview("");
     setEditorOpen(true);
     setError("");
     setNotice("");
@@ -165,6 +166,7 @@ function App() {
       access_type: article.access_type || "FREE",
       status: article.status || "DRAFT",
     });
+    setImagePreview(article.image_url || "");
     setEditorOpen(true);
     setError("");
     setNotice("");
