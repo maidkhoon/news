@@ -38,7 +38,7 @@ router.get("/", async (req, res) => {
   const categoryRelation = categoryFilter ? "categories!inner(name,slug)" : "categories(name,slug)";
   let query = supabase
     .from("articles")
-    .select(`id,title,slug,image_url,access_type,status,published_at,category_id,${categoryRelation}`, { count: "exact" })
+    .select(`id,title,slug,image_url,source_url,source_name,access_type,status,published_at,category_id,${categoryRelation}`, { count: "exact" })
     .eq("status", "PUBLISHED")
     .order("published_at", { ascending: false })
     .range(from, to);
@@ -61,7 +61,7 @@ router.get("/", async (req, res) => {
 router.get("/:slug", async (req, res) => {
   const { data, error } = await supabase
     .from("articles")
-    .select("id,title,slug,image_url,content,access_type,status,published_at,category_id,categories(name,slug)")
+    .select("id,title,slug,image_url,source_url,source_name,content,access_type,status,published_at,category_id,categories(name,slug)")
     .eq("slug", req.params.slug)
     .eq("status", "PUBLISHED")
     .maybeSingle();
