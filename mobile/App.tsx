@@ -7,6 +7,7 @@ import { getAvailablePurchases, useIAP } from 'expo-iap'
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   FlatList,
   Image,
   Pressable,
@@ -36,7 +37,7 @@ type Article = {
   content?: string
   categories?: { name?: string; slug?: string } | null
 }
-type Tab = 'Home' | 'Crypto' | 'Sensex' | 'Nifty 50'
+type Tab = 'Home' | 'Crypto' | 'Sensex' | 'Nifty 50' | 'Cricket'
 type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth'
 type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
@@ -60,8 +61,27 @@ Notifications.setNotificationHandler({
 })
 
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://news-api-egmd.onrender.com').replace(/\/$/, '')
-const NAV_TABS: Tab[] = ['Home', 'Crypto', 'Sensex', 'Nifty 50']
-const FILTERS = ['All', 'India', 'Nifty 50', 'Sensex', 'Crypto']
+const NAV_TABS: Tab[] = ['Home', 'Crypto', 'Sensex', 'Nifty 50', 'Cricket']
+const NAV_ICONS = ['⌂', '₿', '▥', '↗', '🏏']
+const FILTERS = ['All', 'India', 'Nifty 50', 'Sensex', 'Crypto', 'Cricket']
+
+// Classifies Supabase auth errors so DNS/offline, rate-limit, and SMS-provider
+// failures show distinct, actionable messages instead of a raw stack trace.
+function describeAuthError(error: unknown): string {
+  if (!(error instanceof Error)) return 'Please try again.'
+  const message = error.message || ''
+  const status = (error as { status?: number }).status
+  if (/UnknownHostException|Unable to resolve host|ENOTFOUND|Network request failed|fetch failed/i.test(message)) {
+    return 'No internet connection reached BazaarNexa. Check your Wi-Fi or mobile data and try again.'
+  }
+  if (status === 429 || /rate limit|too many/i.test(message)) {
+    return 'Too many attempts. Please wait a minute before requesting another OTP.'
+  }
+  if (/sms|twilio|provider/i.test(message)) {
+    return 'The SMS provider could not send your OTP right now. Please try again shortly.'
+  }
+  return message || 'Please try again.'
+}
 
 function readableDate(value?: string | null) {
   if (!value) return 'Latest research'
@@ -141,7 +161,7 @@ export default function App() {
       setResendCooldown(30)
       Alert.alert('OTP sent', `We sent a 6-digit OTP to ${formattedPhone}.`)
     } catch (error) {
-      Alert.alert('Unable to send OTP', error instanceof Error ? error.message : 'Please try again.')
+      Alert.alert('Unable to send OTP', describeAuthError(error))
     } finally {
       setAuthLoading(false)
     }
@@ -162,7 +182,7 @@ export default function App() {
       if (error) throw error
       setScreen('home')
     } catch (error) {
-      Alert.alert('OTP verification failed', error instanceof Error ? error.message : 'Please try again.')
+      Alert.alert('OTP verification failed', describeAuthError(error))
     } finally {
       setAuthLoading(false)
     }
@@ -461,10 +481,47 @@ export default function App() {
     }
   }
 
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    const onBackPress = () => {
+      if (selectedArticle) {
+        setSelectedArticle(null)
+        return true
+      }
+      if (searchOpen) {
+        setSearchOpen(false)
+        return true
+      }
+      if (screen === 'payment') {
+        setScreen('plans')
+        return true
+      }
+      if (screen !== 'home') {
+        setScreen('home')
+        return true
+      }
+      Alert.alert('Exit BazaarNexa', 'Are you sure you want to exit?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Exit', style: 'destructive', onPress: () => BackHandler.exitApp() },
+      ])
+      return true
+    }
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress)
+    return () => subscription.remove()
+  }, [selectedArticle, searchOpen, screen])
+
+  // Reflects whatever the newsroom actually publishes — a real "cricket" category
+  // from /api/categories will light this up with zero further frontend changes.
+  const hasCricketCategory = useMemo(
+    () => categories.some(c => c.slug?.toLowerCase().includes('cricket') || c.name?.toLowerCase().includes('cricket')),
+    [categories]
+  )
+
   const visibleArticles = useMemo(() => {
     let result = articles
-    const chosen = tab === 'Crypto' ? 'Crypto' : tab === 'Sensex' || tab === 'Nifty 50' ? tab : filter
+    const chosen = tab === 'Crypto' || tab === 'Cricket' || tab === 'Sensex' || tab === 'Nifty 50' ? tab : filter
     if (chosen === 'Crypto') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('crypto') || a.categories?.name?.toLowerCase().includes('crypto'))
+    else if (chosen === 'Cricket') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('cricket') || a.categories?.name?.toLowerCase().includes('cricket'))
     else if (chosen === 'India') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('india') || a.categories?.name?.toLowerCase().includes('india'))
     else if (chosen === 'Sensex' || chosen === 'Nifty 50') result = result.filter(a => a.title.toLowerCase().includes(chosen.toLowerCase()) || a.slug.toLowerCase().includes(chosen.toLowerCase()))
     if (search.trim()) result = result.filter(a => a.title.toLowerCase().includes(search.trim().toLowerCase()))
@@ -547,7 +604,7 @@ export default function App() {
       <SafeAreaView style={styles.screen}>
         <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
         <View style={styles.detailHeader}>
-          <Pressable onPress={() => setSelectedArticle(null)} style={styles.backButton}><Text style={styles.backText}>‹  Back</Text></Pressable>
+          <Pressable onPress={() => setSelectedArticle(null)} style={styles.backButton} hitSlop={12} accessibilityRole="button" accessibilityLabel="Go back"><Text style={styles.backText}>‹  Back</Text></Pressable>
           <Text style={styles.detailBrand}>BazaarNexa</Text>
           <View style={{ width: 48 }} />
         </View>
@@ -740,7 +797,7 @@ export default function App() {
         removeClippedSubviews={Platform.OS !== 'web'}
         renderItem={({ item: article, index }) => (
           <Pressable onPress={() => openArticle(article)} style={styles.articleCard}>
-            {article.image_url ? <Image source={{ uri: article.image_url }} style={styles.articleImage} resizeMode="cover" /> : <View style={styles.articleImageFallback}><Text style={styles.fallbackGlyph}>{article.categories?.slug?.includes('crypto') ? '₿' : '↗'}</Text></View>}
+            {article.image_url ? <Image source={{ uri: article.image_url }} style={styles.articleImage} resizeMode="cover" /> : <View style={styles.articleImageFallback}><Text style={styles.fallbackGlyph}>{article.categories?.slug?.includes('crypto') ? '₿' : article.categories?.slug?.includes('cricket') ? '🏏' : '↗'}</Text></View>}
             <View style={styles.articleCopy}>
               <View style={styles.articleTopline}><Text style={[styles.articleTag, index % 3 === 1 && styles.articleTagPurple]}>{article.categories?.name || 'Research'}</Text><Text style={styles.articleTime}>{readableDate(article.published_at)}</Text></View>
               <Text numberOfLines={3} style={styles.articleTitle}>{article.title}</Text>
@@ -770,14 +827,20 @@ export default function App() {
             )}
             <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>CURATED FOR YOU</Text><Text style={styles.sectionTitle}>Latest Articles</Text></View><Text style={styles.articleCount}>{articles.length} articles</Text></View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-              {FILTERS.map(item => <Pressable key={item} onPress={() => { setFilter(item); setTab(item === 'Crypto' ? 'Crypto' : 'Home') }} style={[styles.filterPill, filter === item && tab === 'Home' && styles.filterPillActive]}><Text style={[styles.filterText, filter === item && tab === 'Home' && styles.filterTextActive]}>{item}</Text></Pressable>)}
+              {FILTERS.map(item => <Pressable key={item} onPress={() => { setFilter(item); setTab(item === 'Crypto' ? 'Crypto' : item === 'Cricket' ? 'Cricket' : 'Home') }} style={[styles.filterPill, filter === item && tab === 'Home' && styles.filterPillActive]}><Text style={[styles.filterText, filter === item && tab === 'Home' && styles.filterTextActive]}>{item}</Text></Pressable>)}
             </ScrollView>
             {(tab === 'Sensex' || tab === 'Nifty 50') && (
               <Text style={styles.sectionNote}>Showing research that mentions “{tab}” by title. This is a text match on existing INDIA/CRYPTO articles, not a dedicated {tab} data feed.</Text>
             )}
             {feedLoading && articles.length === 0 ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading the newsroom…</Text></View> : null}
             {feedError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Couldn’t load research</Text><Text style={styles.muted}>{feedError}</Text><Pressable onPress={() => loadFeed()} style={styles.retryButton}><Text style={styles.retryText}>Try again</Text></Pressable></View> : null}
-            {!feedLoading && !feedError && visibleArticles.length === 0 ? <View style={styles.stateCard}><Text style={styles.stateTitle}>No articles yet</Text><Text style={styles.muted}>Published articles matching this section will appear here. Pull down to refresh.</Text></View> : null}
+            {!feedLoading && !feedError && visibleArticles.length === 0 ? (
+              tab === 'Cricket' && !hasCricketCategory ? (
+                <View style={styles.stateCard}><Text style={styles.stateTitle}>Cricket coverage isn’t available yet</Text><Text style={styles.muted}>BazaarNexa hasn’t published a Cricket category yet. Check back soon.</Text></View>
+              ) : (
+                <View style={styles.stateCard}><Text style={styles.stateTitle}>No articles yet</Text><Text style={styles.muted}>Published articles matching this section will appear here. Pull down to refresh.</Text></View>
+              )
+            ) : null}
           </>
         }
         ListFooterComponent={
@@ -792,7 +855,7 @@ export default function App() {
         }
       />
       <View style={styles.bottomNav}>
-        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' ? 'Crypto' : item === 'Home' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{['⌂', '₿', '▥', '↗'][index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
+        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' || item === 'Cricket' ? item : item === 'Home' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{NAV_ICONS[index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
       </View>
     </SafeAreaView>
   )
@@ -915,7 +978,7 @@ const styles = StyleSheet.create({
   navDot: { height: 3, width: 12, borderRadius: 2, backgroundColor: 'transparent', marginTop: 2 },
   navDotActive: { backgroundColor: COLORS.blue, width: 18 },
   detailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 15, borderBottomWidth: 1, borderBottomColor: COLORS.border },
-  backButton: { width: 65 },
+  backButton: { width: 65, minHeight: 44, justifyContent: 'center' },
   backText: { color: COLORS.blueLight, fontSize: 15, fontWeight: '700' },
   detailBrand: { color: COLORS.text, fontWeight: '800', fontSize: 16 },
   detailContent: { padding: 18, paddingBottom: 35 },

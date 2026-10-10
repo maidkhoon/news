@@ -23,7 +23,11 @@
       "expo-iap"
     ],
     "extra": {
-      "apiBaseUrl": "https://news-api-egmd.onrender.com"
-    }
+      "apiBaseUrl": "https://news-api-egmd.onrender.com",
+      "eas": {
+        "projectId": "f41cf023-d17c-477c-affd-3cb1ed3beb16"
+      }
+    },
+    "owner": "fintech-automated-solutions"
   }
 }
