@@ -1079,7 +1079,7 @@ const styles = StyleSheet.create({
   moverChange: { fontSize: 12, fontWeight: '900' },
   moverPositive: { color: COLORS.green },
   moverNegative: { color: '#FF7B88' },
-  moverDisclaimer: { color: COLORS.muted, fontSize: 10, lineHeight: 15, marginTop: 12 }
+  moverDisclaimer: { color: COLORS.muted, fontSize: 10, lineHeight: 15, marginTop: 12 },
   loadMoreButton: { marginTop: 4, marginBottom: 14 },
   authScreen: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 22, justifyContent: 'center' },
   authBackButton: { position: 'absolute', top: 54, left: 18, zIndex: 10, padding: 6 },
