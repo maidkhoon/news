@@ -343,8 +343,8 @@ function App() {
       <aside className="sidebar">
         <a className="brand" href="#" aria-label="News admin home"><span className="brand-mark small">N<span>.</span></span><span>newsroom<small>ADMIN CONSOLE</small></span></a>
         <div className="workspace-label">WORKSPACE</div>
-        <div className="nav-item active"><span className="nav-icon">▦</span> Articles <span className="nav-count">{articles.length}</span></div>
-        <div className="nav-item muted-nav"><span className="nav-icon">◈</span> Categories</div>
+        <button className={`nav-item ${page === "articles" ? "active" : ""}`} onClick={() => setPage("articles")}><span className="nav-icon">▦</span> Articles <span className="nav-count">{articles.length}</span></button>
+        <button className={`nav-item ${page === "categories" ? "active" : ""}`} onClick={() => setPage("categories")}><span className="nav-icon">◈</span> Categories <span className="nav-count">{categories.length}</span></button>
         <div className="sidebar-bottom">
           <div className="secure-note"><span>✳</span><div><strong>Secure workspace</strong><small>Role-protected access</small></div></div>
           <div className="user-row"><div className="avatar">{(session.user.email || "A").slice(0, 1).toUpperCase()}</div><div className="user-meta"><strong>{session.user.email}</strong><small>Administrator</small></div><button className="icon-button" onClick={signOut} title="Sign out" aria-label="Sign out">↗</button></div>
@@ -352,23 +352,23 @@ function App() {
       </aside>
 
       <main className="main-content">
-        <header className="topbar"><div><span className="breadcrumb">Workspace</span><span className="crumb-divider">/</span><strong>Articles</strong></div><div className="topbar-right"><span className="live-dot" /> API connected <button className="avatar top-avatar">{(session.user.email || "A").slice(0, 1).toUpperCase()}</button></div></header>
+        <header className="topbar"><div><span className="breadcrumb">Workspace</span><span className="crumb-divider">/</span><strong>{page === "articles" ? "Articles" : "Categories"}</strong></div><div className="topbar-right"><span className="live-dot" /> API connected <button className="avatar top-avatar">{(session.user.email || "A").slice(0, 1).toUpperCase()}</button></div></header>
         <section className="page-heading">
-          <div><p className="eyebrow">CONTENT MANAGEMENT</p><h1>Articles <span className="heading-period">.</span></h1><p className="muted">Create, organize and publish your newsroom content.</p></div>
-          <button className="primary-button" onClick={openCreate}>＋ <span>New article</span></button>
+          <div><p className="eyebrow">CONTENT MANAGEMENT</p><h1>{page === "articles" ? "Articles" : "Categories"} <span className="heading-period">.</span></h1><p className="muted">{page === "articles" ? "Create, organize and publish your newsroom content." : "Create and organize the sections that power your app."}</p></div>
+          {page === "articles" ? <button className="primary-button" onClick={openCreate}>＋ <span>New article</span></button> : <button className="primary-button" onClick={openCreateCategory}>＋ <span>New category</span></button>}
         </section>
 
-        <section className="stats-grid">
+        {page === "articles" && <section className="stats-grid">
           <div className="stat-card"><div className="stat-label">Total articles <span>↗</span></div><div className="stat-number">{counts.all}</div><div className="stat-caption">Across all categories</div></div>
           <div className="stat-card"><div className="stat-label">Published <span className="stat-symbol green">●</span></div><div className="stat-number">{counts.published}</div><div className="stat-caption">Visible to readers</div></div>
           <div className="stat-card"><div className="stat-label">Drafts <span className="stat-symbol amber">◷</span></div><div className="stat-number">{counts.drafts}</div><div className="stat-caption">Work in progress</div></div>
           <div className="stat-card"><div className="stat-label">Premium <span className="stat-symbol violet">◆</span></div><div className="stat-number">{counts.premium}</div><div className="stat-caption">Subscriber content</div></div>
-        </section>
+        </section>}
 
         {error && <div className="alert error-alert"><strong>Something needs attention</strong><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error">×</button></div>}
         {notice && <div className="alert success-alert"><span>✓</span>{notice}<button onClick={() => setNotice("")} aria-label="Dismiss message">×</button></div>}
 
-        <section className="content-card">
+        {page === "articles" && <section className="content-card">
           <div className="table-heading"><div><h2>All articles</h2><p className="muted">Manage drafts and published research.</p></div><button className="secondary-button" onClick={loadData} disabled={loading}>↻ <span>Refresh</span></button></div>
           <div className="filters">
             <label className="search-box"><span>⌕</span><input aria-label="Search articles" placeholder="Search by title or slug…" value={search} onChange={(e) => setSearch(e.target.value)} /><kbd>⌘ K</kbd></label>
