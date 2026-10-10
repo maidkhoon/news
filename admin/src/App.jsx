@@ -60,6 +60,15 @@ function App() {
   const [imageMode, setImageMode] = useState("cover");
   const [imageUploading, setImageUploading] = useState(false);
   const [imagePreview, setImagePreview] = useState("");
+  const [users, setUsers] = useState([]);
+  const [userSearch, setUserSearch] = useState("");
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [profileName, setProfileName] = useState("");
+  const [planType, setPlanType] = useState("BASIC_MONTHLY");
+  const [planExpiry, setPlanExpiry] = useState(() => new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+  const [userSaving, setUserSaving] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -114,6 +123,22 @@ function App() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  const loadProfile = useCallback(async () => {
+    if (!session) return;
+    try { const result = await apiFetch("/api/admin/me"); setProfile(result.data); setProfileName(result.data?.name || ""); }
+    catch (err) { setError(err.message || "Unable to load admin profile."); }
+  }, [session, apiFetch]);
+  useEffect(() => { loadProfile(); }, [loadProfile]);
+
+  const loadUsers = useCallback(async () => {
+    if (!session) return;
+    setUsersLoading(true);
+    try { const result = await apiFetch(`/api/admin/users?search=${encodeURIComponent(userSearch)}`); setUsers(result.data || []); }
+    catch (err) { setError(err.message || "Unable to load users."); }
+    finally { setUsersLoading(false); }
+  }, [session, apiFetch, userSearch]);
+  useEffect(() => { if (page === "users") loadUsers(); }, [page, loadUsers]);
+
   const counts = useMemo(() => ({
     all: articles.length,
     published: articles.filter((a) => a.status === "PUBLISHED").length,
@@ -138,6 +163,25 @@ function App() {
     });
     setLoginBusy(false);
     setLoginMessage(authError ? authError.message : "Sign-in link sent. Open the email on this device to continue.");
+  }
+
+  async function saveProfile(event) {
+    event.preventDefault(); setUserSaving(true); setError(""); setNotice("");
+    try { const result = await apiFetch(`/api/admin/users/${profile.id}`, { method: "PATCH", body: JSON.stringify({ name: profileName }) }); setProfile(result.data); setNotice("Admin profile updated."); }
+    catch (err) { setError(err.message || "Unable to update profile."); } finally { setUserSaving(false); }
+  }
+  async function updateUserStatus(user, status) {
+    setError(""); setNotice("");
+    try { const result = await apiFetch(`/api/admin/users/${user.id}`, { method: "PATCH", body: JSON.stringify({ status }) }); setUsers(current => current.map(item => item.id === user.id ? { ...item, ...result.data } : item)); if (selectedUser?.id === user.id) setSelectedUser(current => ({ ...current, ...result.data })); setNotice(status ? "User account enabled." : "User account disabled."); }
+    catch (err) { setError(err.message || "Unable to update user."); }
+  }
+  async function assignPlan(user) {
+    setUserSaving(true); setError(""); setNotice("");
+    try {
+      if (planType === "FREE") await apiFetch(`/api/admin/users/${user.id}/free-plan`, { method: "POST", body: JSON.stringify({}) });
+      else await apiFetch(`/api/admin/users/${user.id}/plan`, { method: "POST", body: JSON.stringify({ plan_type: planType, expiry_date: new Date(`${planExpiry}T23:59:59.000Z`).toISOString() }) });
+      setNotice(planType === "FREE" ? "User moved to the Free plan." : `${planType.replaceAll("_", " ")} assigned until ${planExpiry}.`); setSelectedUser(null); await loadUsers();
+    } catch (err) { setError(err.message || "Unable to change user plan."); } finally { setUserSaving(false); }
   }
 
   async function signOut() {
@@ -347,17 +391,19 @@ function App() {
         <div className="workspace-label">WORKSPACE</div>
         <button className={`nav-item ${page === "articles" ? "active" : ""}`} onClick={() => setPage("articles")}><span className="nav-icon">▦</span> Articles <span className="nav-count">{articles.length}</span></button>
         <button className={`nav-item ${page === "categories" ? "active" : ""}`} onClick={() => setPage("categories")}><span className="nav-icon">◈</span> Categories <span className="nav-count">{categories.length}</span></button>
+        <button className={`nav-item ${page === "users" ? "active" : ""}`} onClick={() => setPage("users")}><span className="nav-icon">♙</span> Users <span className="nav-count">{users.length}</span></button>
+        <button className={`nav-item ${page === "profile" ? "active" : ""}`} onClick={() => setPage("profile")}><span className="nav-icon">◎</span> Admin profile</button>
         <div className="sidebar-bottom">
           <div className="secure-note"><span>✳</span><div><strong>Secure workspace</strong><small>Role-protected access</small></div></div>
-          <div className="user-row"><div className="avatar">{(session.user.email || "A").slice(0, 1).toUpperCase()}</div><div className="user-meta"><strong>{session.user.email}</strong><small>Administrator</small></div><button className="icon-button" onClick={signOut} title="Sign out" aria-label="Sign out">↗</button></div>
+          <button className="user-row profile-shortcut" onClick={() => setPage("profile")}><div className="avatar">{(profile?.name || session.user.email || "A").slice(0,1).toUpperCase()}</div><div className="user-meta"><strong>{profile?.name || session.user.email}</strong><small>Administrator · Profile</small></div></button><div className="signout-holder"><button className="icon-button" onClick={signOut} title="Sign out" aria-label="Sign out">↗</button></div>
         </div>
       </aside>
 
       <main className="main-content">
-        <header className="topbar"><div><span className="breadcrumb">Workspace</span><span className="crumb-divider">/</span><strong>{page === "articles" ? "Articles" : "Categories"}</strong></div><div className="topbar-right"><span className="live-dot" /> API connected <button className="avatar top-avatar">{(session.user.email || "A").slice(0, 1).toUpperCase()}</button></div></header>
+        <header className="topbar"><div><span className="breadcrumb">Workspace</span><span className="crumb-divider">/</span><strong>{({ articles: "Articles", categories: "Categories", users: "Users", profile: "Admin profile" })[page] || "Articles"}</strong></div><div className="topbar-right"><span className="live-dot" /> API connected <button className="avatar top-avatar">{(session.user.email || "A").slice(0, 1).toUpperCase()}</button></div></header>
         <section className="page-heading">
-          <div><p className="eyebrow">CONTENT MANAGEMENT</p><h1>{page === "articles" ? "Articles" : "Categories"} <span className="heading-period">.</span></h1><p className="muted">{page === "articles" ? "Create, organize and publish your newsroom content." : "Create and organize the sections that power your app."}</p></div>
-          {page === "articles" ? <button className="primary-button" onClick={openCreate}>＋ <span>New article</span></button> : <button className="primary-button" onClick={openCreateCategory}>＋ <span>New category</span></button>}
+          <div><p className="eyebrow">CONTENT MANAGEMENT</p><h1>{({ articles: "Articles", categories: "Categories", users: "Users", profile: "Admin profile" })[page] || "Articles"} <span className="heading-period">.</span></h1><p className="muted">{({ articles: "Create, organize and publish your newsroom content.", categories: "Create and organize the sections that power your app.", users: "Manage accounts, access and subscription entitlements.", profile: "View and update your administrator account." })[page]}</p></div>
+          {page === "articles" ? <button className="primary-button" onClick={openCreate}>＋ <span>New article</span></button> : page === "categories" ? <button className="primary-button" onClick={openCreateCategory}>＋ <span>New category</span></button> : page === "users" ? <button className="secondary-button" onClick={loadUsers} disabled={usersLoading}>↻ Refresh users</button> : null}
         </section>
 
         {page === "articles" && <section className="stats-grid">
@@ -417,8 +463,15 @@ function App() {
           </div>
           <div className="table-footer"><span><strong>{categories.length}</strong> categories</span><span>Slugs power API filters</span></div>
         </section>}
+
+        {page === "users" && <section className="content-card"><div className="table-heading"><div><h2>Registered users</h2><p className="muted">Account access and plan entitlements. Up to 500 most recent profiles.</p></div></div><div className="filters"><label className="search-box"><span>⌕</span><input aria-label="Search users" placeholder="Search name, email or phone…" value={userSearch} onChange={e => setUserSearch(e.target.value)} /></label></div><div className="table-wrap"><table><thead><tr><th>USER</th><th>ROLE</th><th>PLAN</th><th>ACCOUNT</th><th>JOINED</th><th>ACTIONS</th></tr></thead><tbody>{usersLoading ? <tr><td colSpan="6" className="empty-state"><div className="spinner" />Loading users…</td></tr> : users.length === 0 ? <tr><td colSpan="6" className="empty-state"><strong>No users found</strong><span>Try another search term.</span></td></tr> : users.map(user => <tr key={user.id}><td><div className="article-cell"><div className="avatar">{(user.name || user.email || "U").slice(0,1).toUpperCase()}</div><div><strong>{user.name || "Unnamed user"}</strong><small>{user.email || user.phone || user.id}</small></div></div></td><td><span className="category-pill">{user.role}</span></td><td><span className={user.subscription?.active ? "access-premium" : "access-free"}>{user.subscription?.active ? user.subscription.plan_type.replaceAll("_"," ") : "FREE"}</span></td><td><span className={`status-pill ${user.status ? "status-published" : "status-unpublished"}`}><i />{user.status ? "Active" : "Disabled"}</span></td><td className="date-cell">{user.created_at ? new Date(user.created_at).toLocaleDateString() : "—"}</td><td><div className="row-actions"><button className="secondary-button compact-button" onClick={() => { setSelectedUser(user); setPlanType(user.subscription?.active ? user.subscription.plan_type : "FREE"); }}>Manage</button>{user.role !== "ADMIN" && <button className="icon-button" title={user.status ? "Disable user" : "Enable user"} onClick={() => updateUserStatus(user, !user.status)}>{user.status ? "⊘" : "✓"}</button>}</div></td></tr>)}</tbody></table></div><div className="table-footer"><span><strong>{users.length}</strong> users shown</span><span>Admin actions are role-protected</span></div></section>}
+        {page === "profile" && <section className="content-card profile-card"><div className="table-heading"><div><h2>Administrator profile</h2><p className="muted">Your signed-in account and role information.</p></div></div><form className="editor-form profile-form" onSubmit={saveProfile}><div className="profile-hero"><div className="profile-avatar">{(profile?.name || session.user.email || "A").slice(0,1).toUpperCase()}</div><div><strong>{profile?.name || "Administrator"}</strong><p className="muted">{profile?.email || session.user.email}</p><span className="category-pill">{profile?.role || "ADMIN"}</span></div></div><label>Display name<input value={profileName} onChange={e => setProfileName(e.target.value)} maxLength="120" placeholder="Your name" /></label><label>Email address<input value={profile?.email || session.user.email || ""} readOnly /></label><label>Account role<input value={profile?.role || "ADMIN"} readOnly /></label><label>Account status<input value={profile?.status ? "Active" : "Disabled"} readOnly /></label><div className="modal-actions"><button className="primary-button" disabled={userSaving || !profile}>{userSaving ? "Saving…" : "Save profile"}</button></div></form></section>}
+
         <footer className="page-footer"><span>NEWSROOM ADMIN</span><span>Write with clarity. Publish with confidence.</span></footer>
       </main>
+
+
+      {selectedUser && <div className="modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setSelectedUser(null); }}><section className="editor-modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-title"><div className="modal-header"><div><p className="eyebrow">USER MANAGEMENT</p><h2 id="user-modal-title">{selectedUser.name || "User details"}</h2><p className="muted">{selectedUser.email || selectedUser.phone || selectedUser.id}</p></div><button className="icon-button close-button" onClick={() => setSelectedUser(null)} aria-label="Close user management">×</button></div><div className="editor-form"><div className="user-detail-grid"><div><small>Account</small><strong>{selectedUser.status ? "Active" : "Disabled"}</strong></div><div><small>Role</small><strong>{selectedUser.role}</strong></div><div><small>Current plan</small><strong>{selectedUser.subscription?.active ? selectedUser.subscription.plan_type.replaceAll("_"," ") : "FREE"}</strong></div><div><small>Joined</small><strong>{selectedUser.created_at ? new Date(selectedUser.created_at).toLocaleDateString() : "—"}</strong></div></div><label>Subscription plan<select value={planType} onChange={e => setPlanType(e.target.value)}><option value="FREE">FREE</option><option value="BASIC_MONTHLY">BASIC MONTHLY</option><option value="BASIC_YEARLY">BASIC YEARLY</option><option value="PRO_MONTHLY">PRO MONTHLY</option><option value="PRO_YEARLY">PRO YEARLY</option></select></label>{planType !== "FREE" && <label>Entitlement expiry date<input type="date" min={new Date().toISOString().slice(0,10)} value={planExpiry} onChange={e => setPlanExpiry(e.target.value)} required /></label>}<p className="muted">Manual plan changes grant app access only. They do not charge, refund, or alter Google Play subscriptions.</p><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setSelectedUser(null)}>Cancel</button><button type="button" className="primary-button" disabled={userSaving} onClick={() => assignPlan(selectedUser)}>{userSaving ? "Saving…" : "Save plan"}</button></div>{selectedUser.role !== "ADMIN" && <button className="secondary-button" onClick={() => { updateUserStatus(selectedUser, !selectedUser.status); setSelectedUser(null); }}>{selectedUser.status ? "Disable account" : "Enable account"}</button>}</div></section></div>}
 
       {categoryEditorOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setCategoryEditorOpen(false); }}>
         <section className="editor-modal category-editor-modal" role="dialog" aria-modal="true" aria-labelledby="category-editor-title">

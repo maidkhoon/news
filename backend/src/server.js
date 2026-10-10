@@ -6,6 +6,7 @@ import articleRoutes from "./routes/articles.js";
 import categoryRoutes from "./routes/categories.js";
 import adminRoutes from "./routes/admin.js";
 import adminCategoryRoutes from "./routes/admin-categories.js";
+import adminUserRoutes from "./routes/admin-users.js";
 import userRoutes from "./routes/users.js";
 import deviceRoutes from "./routes/devices.js";
 import notificationRoutes from "./routes/notifications.js";
@@ -39,6 +40,7 @@ app.use("/api/devices", deviceRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/admin/categories", adminCategoryRoutes);
+app.use("/api/admin", adminUserRoutes);
 app.use("/api/admin", adminRoutes);
 
 app.use((_req, res) => {
