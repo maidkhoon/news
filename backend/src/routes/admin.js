@@ -30,6 +30,15 @@ function makeSlug(value) {
     .slice(0, 140);
 }
 
+function isHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function validateArticle(body, { partial = false } = {}) {
   const errors = [];
   const required = ["title", "content", "category_id"];
@@ -46,7 +55,7 @@ function validateArticle(body, { partial = false } = {}) {
   if (body.content !== undefined && (typeof body.content !== "string" || !body.content.trim())) errors.push("content");
   if (body.category_id !== undefined && (typeof body.category_id !== "string" || !body.category_id.trim())) errors.push("category_id");
   if (body.image_url !== undefined && body.image_url !== null && typeof body.image_url !== "string") errors.push("image_url");
-  if (body.source_url !== undefined && body.source_url !== null && (typeof body.source_url !== "string" || !/^https?:\\/\\//i.test(body.source_url))) errors.push("source_url");
+  if (body.source_url !== undefined && body.source_url !== null && (typeof body.source_url !== "string" || !isHttpUrl(body.source_url))) errors.push("source_url");
   if (body.source_name !== undefined && body.source_name !== null && (typeof body.source_name !== "string" || body.source_name.length > 200)) errors.push("source_name");
   if (body.access_type !== undefined && !["FREE", "PREMIUM"].includes(body.access_type)) errors.push("access_type");
   if (body.status !== undefined && !["DRAFT", "PUBLISHED", "UNPUBLISHED"].includes(body.status)) errors.push("status");
