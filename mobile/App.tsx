@@ -40,10 +40,12 @@ type Article = {
   content?: string
   categories?: { name?: string; slug?: string } | null
 }
-type Tab = 'Home' | 'Crypto' | 'Sensex' | 'Nifty 50' | 'Cricket'
+type Tab = 'Home' | 'Crypto' | 'NSE' | 'BSE' | 'Cricket'
 type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth'
 type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
+type MarketStock = { symbol: string; name: string; exchange: 'NSE' | 'BSE'; price: number; change: number | null; percentChange: number; volume: number | null; dataTimestamp: string | null }
+type MarketMovers = { exchange: 'NSE' | 'BSE'; count: number; gainers: MarketStock[]; losers: MarketStock[]; fetchedAt: string; dataTimestamp: string | null; cached: boolean }
 
 const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
 const TOPICS_STORAGE_KEY = 'bazaarnexa:briefing-topics'
@@ -66,8 +68,8 @@ Notifications.setNotificationHandler({
 })
 
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://news-api-egmd.onrender.com').replace(/\/$/, '')
-const NAV_TABS: Tab[] = ['Home', 'Crypto', 'Sensex', 'Nifty 50', 'Cricket']
-const NAV_ICONS = ['⌂', '₿', '▥', '↗', '🏏']
+const NAV_TABS: Tab[] = ['Home', 'Crypto', 'NSE', 'BSE', 'Cricket']
+const NAV_ICONS = ['⌂', '₿', '↗', '▥', '🏏']
 const FILTERS = ['All', 'India', 'Nifty 50', 'Sensex', 'Crypto', 'Cricket']
 
 // Classifies Supabase auth errors so network, rate-limit, and WhatsApp provider
@@ -114,6 +116,10 @@ export default function App() {
   const [feedLoading, setFeedLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [feedError, setFeedError] = useState('')
+  const [marketMovers, setMarketMovers] = useState<MarketMovers | null>(null)
+  const [marketLoading, setMarketLoading] = useState(false)
+  const [marketError, setMarketError] = useState('')
+  const [marketView, setMarketView] = useState<'gainers' | 'losers'>('gainers')
   const [filter, setFilter] = useState('All')
   const [tab, setTab] = useState<Tab>('Home')
   const [search, setSearch] = useState('')
@@ -247,6 +253,24 @@ export default function App() {
       setLoadingMore(false)
     }
   }, [])
+
+  const loadMarketMovers = useCallback(async (exchange: 'NSE' | 'BSE') => {
+    setMarketLoading(true)
+    setMarketError('')
+    try {
+      const response = await fetch(API_BASE + '/api/market/movers?exchange=' + exchange + '&count=20')
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.message || json.error || 'Market data is temporarily unavailable.')
+      setMarketMovers(json as MarketMovers)
+    } catch (error) {
+      setMarketError(error instanceof Error ? error.message : 'Unable to load market movers.')
+      setMarketMovers(null)
+    } finally { setMarketLoading(false) }
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'NSE' || tab === 'BSE') void loadMarketMovers(tab)
+  }, [tab, loadMarketMovers])
 
   const loadBriefing = async (article: Article) => {
     setBriefingLoading(true)
@@ -896,6 +920,27 @@ export default function App() {
         )}
         ListHeaderComponent={
           <>
+            {(tab === 'NSE' || tab === 'BSE') ? (
+              <View style={styles.moversPanel}>
+                <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>INDIAN EQUITY MARKETS</Text><Text style={styles.sectionTitle}>{tab} Top Movers</Text></View><Pressable onPress={() => void loadMarketMovers(tab)} style={styles.retryButton}><Text style={styles.retryText}>Refresh</Text></Pressable></View>
+                <View style={styles.moverTabs}>
+                  <Pressable onPress={() => setMarketView('gainers')} style={[styles.moverTab, marketView === 'gainers' && styles.moverTabActive]}><Text style={[styles.moverTabText, marketView === 'gainers' && styles.moverTabTextActive]}>Top Gainers</Text></Pressable>
+                  <Pressable onPress={() => setMarketView('losers')} style={[styles.moverTab, marketView === 'losers' && styles.moverTabActive]}><Text style={[styles.moverTabText, marketView === 'losers' && styles.moverTabTextActive]}>Top Losers</Text></Pressable>
+                </View>
+                {marketLoading ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading {tab} market movers…</Text></View> : null}
+                {marketError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Market data unavailable</Text><Text style={styles.muted}>{marketError}</Text><Text style={styles.muted}>No sample prices are shown. Configure a licensed provider to enable live data.</Text></View> : null}
+                {!marketLoading && !marketError && marketMovers?.exchange === tab ? <>
+                  <Text style={styles.moverMeta}>Provider snapshot · fetched {new Date(marketMovers.fetchedAt).toLocaleString('en-IN')}</Text>
+                  {marketMovers.dataTimestamp ? <Text style={styles.moverMeta}>Latest provider trade timestamp: {new Date(marketMovers.dataTimestamp).toLocaleString('en-IN')}</Text> : <Text style={styles.moverMeta}>Provider did not supply a trade timestamp.</Text>}
+                  {(marketView === 'gainers' ? marketMovers.gainers : marketMovers.losers).length ? (marketView === 'gainers' ? marketMovers.gainers : marketMovers.losers).map((stock, index) => <View key={stock.exchange + '-' + stock.symbol + '-' + index} style={styles.moverRow}>
+                    <View style={styles.moverRank}><Text style={styles.moverRankText}>{index + 1}</Text></View>
+                    <View style={styles.moverCopy}><Text style={styles.moverName} numberOfLines={1}>{stock.name}</Text><Text style={styles.moverSymbol}>{stock.symbol} · {stock.exchange}{stock.dataTimestamp ? ' · ' + new Date(stock.dataTimestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}</Text></View>
+                    <View style={styles.moverValues}><Text style={styles.moverPrice}>₹{stock.price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Text><Text style={[styles.moverChange, stock.percentChange >= 0 ? styles.moverPositive : styles.moverNegative]}>{stock.percentChange >= 0 ? '+' : ''}{stock.percentChange.toFixed(2)}%</Text></View>
+                  </View>) : <View style={styles.stateCard}><Text style={styles.stateTitle}>No {marketView} data returned</Text><Text style={styles.muted}>The provider may not have data available while the market is closed.</Text></View>}
+                </> : null}
+                <Text style={styles.moverDisclaimer}>Market data may be delayed by the provider. For research only—not investment advice.</Text>
+              </View>
+            ) : null}
             <View style={styles.marketStrip}>
               <View style={styles.marketTile}><Text style={styles.marketEmoji}>🇮🇳</Text><View><Text style={styles.marketName}>INDIA</Text><Text style={styles.marketValue}>Market research</Text></View><Text style={styles.marketArrow}>↗</Text></View>
               <View style={styles.marketTile}><Text style={styles.marketEmoji}>₿</Text><View><Text style={styles.marketName}>CRYPTO</Text><Text style={styles.marketValue}>Digital assets</Text></View><Text style={styles.marketArrow}>↗</Text></View>
@@ -974,6 +1019,25 @@ const styles = StyleSheet.create({
   otpActionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   linkTextDisabled: { color: COLORS.muted },
   sectionNote: { color: COLORS.muted, fontSize: 11, lineHeight: 16, marginBottom: 12 },
+  moversPanel: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 16, padding: 13, marginBottom: 18, marginTop: 10 },
+  moverTabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  moverTab: { flex: 1, borderRadius: 9, paddingVertical: 10, alignItems: 'center', backgroundColor: '#07182B', borderWidth: 1, borderColor: COLORS.border },
+  moverTabActive: { backgroundColor: COLORS.blue, borderColor: COLORS.blue },
+  moverTabText: { color: '#B5C7DC', fontWeight: '800', fontSize: 12 },
+  moverTabTextActive: { color: '#FFFFFF' },
+  moverMeta: { color: COLORS.muted, fontSize: 10, lineHeight: 15, marginBottom: 4 },
+  moverRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  moverRank: { width: 25, height: 25, borderRadius: 8, backgroundColor: COLORS.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  moverRankText: { color: COLORS.muted, fontSize: 10, fontWeight: '800' },
+  moverCopy: { flex: 1 },
+  moverName: { color: COLORS.text, fontSize: 12, fontWeight: '800' },
+  moverSymbol: { color: COLORS.muted, fontSize: 9, marginTop: 4 },
+  moverValues: { alignItems: 'flex-end', gap: 4 },
+  moverPrice: { color: COLORS.text, fontSize: 12, fontWeight: '800' },
+  moverChange: { fontSize: 12, fontWeight: '900' },
+  moverPositive: { color: COLORS.green },
+  moverNegative: { color: '#FF7B88' },
+  moverDisclaimer: { color: COLORS.muted, fontSize: 10, lineHeight: 15, marginTop: 12 }
   loadMoreButton: { marginTop: 4, marginBottom: 14 },
   authScreen: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 22, justifyContent: 'center' },
   authBackButton: { position: 'absolute', top: 54, left: 18, zIndex: 10, padding: 6 },
