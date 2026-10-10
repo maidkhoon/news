@@ -1,35 +1,28 @@
 import { supabase } from "../lib/supabase.js";
+import { requireUser } from "./require-user.js";
 
+/**
+ * Require a valid user token and an enabled ADMIN profile.
+ * requireUser attaches the verified Supabase auth user to req.user/req.authUser.
+ */
 export async function requireAdmin(req, res, next) {
-  const authorization = req.get("authorization") || "";
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  await requireUser(req, res, async () => {
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("id,role,status")
+      .eq("id", req.authUser.id)
+      .maybeSingle();
 
-  if (!match) {
-    return res.status(401).json({ error: "Authentication required" });
-  }
+    if (error) {
+      console.error("Admin profile lookup failed:", error.message);
+      return res.status(500).json({ error: "Unable to verify admin permissions" });
+    }
 
-  const { data: authData, error: authError } = await supabase.auth.getUser(match[1]);
+    if (!profile || profile.status !== true || profile.role !== "ADMIN") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
 
-  if (authError || !authData?.user) {
-    return res.status(401).json({ error: "Invalid or expired access token" });
-  }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("id,role,status")
-    .eq("id", authData.user.id)
-    .maybeSingle();
-
-  if (profileError) {
-    console.error("Admin profile lookup failed:", profileError.message);
-    return res.status(500).json({ error: "Unable to verify admin permissions" });
-  }
-
-  if (!profile || profile.status !== true || profile.role !== "ADMIN") {
-    return res.status(403).json({ error: "Admin access required" });
-  }
-
-  req.user = authData.user;
-  req.adminProfile = profile;
-  return next();
+    req.adminProfile = profile;
+    return next();
+  });
 }
