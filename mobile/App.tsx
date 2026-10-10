@@ -123,6 +123,7 @@ export default function App() {
   const [marketError, setMarketError] = useState('')
   const [marketView, setMarketView] = useState<'gainers' | 'losers'>('gainers')
   const [ticker, setTicker] = useState<MarketTicker | null>(null)
+  const [tickerStale, setTickerStale] = useState(false)
   const tickerScrollRef = useRef<ScrollView | null>(null)
   const [tickerContentWidth, setTickerContentWidth] = useState(0)
   const [filter, setFilter] = useState('All')
@@ -283,8 +284,10 @@ export default function App() {
       const json = await response.json()
       if (!response.ok) throw new Error(json.message || 'Ticker unavailable')
       setTicker(json as MarketTicker)
+      setTickerStale(false)
     } catch {
-      // Keep the last successful ticker visible if a refresh fails.
+      // Keep the last successful ticker visible, but mark it stale.
+      setTickerStale(true)
     }
   }, [])
 
@@ -921,7 +924,7 @@ export default function App() {
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
       <View style={styles.tickerBar}>
-        <Text style={styles.tickerLabel}>LIVE</Text>
+        <Text style={[styles.tickerLabel, tickerStale && styles.tickerLabelStale]}>{tickerStale ? 'DELAYED' : 'LIVE'}</Text>
         {ticker?.items?.length ? <ScrollView ref={tickerScrollRef} horizontal showsHorizontalScrollIndicator={false} onContentSizeChange={width => setTickerContentWidth(width)} contentContainerStyle={styles.tickerContent}>
           {[...ticker.items, ...ticker.items].map((item, index) => <View key={item.kind + '-' + item.exchange + '-' + item.symbol + '-' + index} style={styles.tickerItem}>
             <Text style={styles.tickerSymbol}>{item.symbol}{item.exchange ? ' · ' + item.exchange : ''}</Text>
@@ -1109,6 +1112,7 @@ const styles = StyleSheet.create({
   disclaimer: { color: '#718AA6', fontSize: 10, textAlign: 'center', lineHeight: 16, marginVertical: 18, paddingHorizontal: 8 },
   tickerBar: { height: 34, flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C1220', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' },
   tickerLabel: { color: '#2ED59A', fontSize: 9, fontWeight: '900', letterSpacing: 1, paddingHorizontal: 10 },
+  tickerLabelStale: { color: '#8A93A6' },
   tickerContent: { alignItems: 'center', paddingRight: 12 },
   tickerItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, height: 34 },
   tickerSymbol: { color: '#CBD5E1', fontSize: 10, fontWeight: '800' },

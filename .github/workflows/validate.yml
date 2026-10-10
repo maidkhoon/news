@@ -6,14 +6,14 @@ on:
     paths:
       - "mobile/**"
       - "backend/**"
-      - "mcp-server/**"
+      - "tools/bazaarnexa-mcp/**"
       - ".github/workflows/validate.yml"
   push:
     branches: [main]
     paths:
       - "mobile/**"
       - "backend/**"
-      - "mcp-server/**"
+      - "tools/bazaarnexa-mcp/**"
       - ".github/workflows/validate.yml"
 
 jobs:
@@ -43,15 +43,13 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - run: node --check src/server.js
-      - run: node --check src/routes/admin.js
-      - run: node --check src/routes/insights.js
+      - run: find src -name '*.js' -exec node --check {} +
 
   mcp-check:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: mcp-server
+        working-directory: tools/bazaarnexa-mcp
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -52,7 +52,19 @@ app.use((_req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
-app.listen(port, "0.0.0.0", () => {
+app.use((err, _req, res, _next) => {
+  console.error("Unhandled error:", err?.message || err);
+  res.status(500).json({ error: "Internal server error" });
+});
+
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`News API listening on port ${port}`);
   startNewsIngestionScheduler();
 });
+
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => {
+    console.log(`${signal} received, closing server`);
+    server.close(() => process.exit(0));
+  });
+}
