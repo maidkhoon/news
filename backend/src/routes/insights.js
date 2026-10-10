@@ -24,7 +24,7 @@ function significantWords(value) {
 }
 
 router.post("/summary", async (req, res) => {
-  const clientKey = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").split(",")[0].trim();
+  const clientKey = String(req.ip || req.socket.remoteAddress || "unknown");
   if (overBriefingLimit(clientKey)) return res.status(429).json({ error: "Too many briefing requests. Please wait a minute and try again." });
   const slug = typeof req.body?.slug === "string" ? req.body.slug.trim().slice(0, 180) : "";
   if (!slug) return res.status(400).json({ error: "A valid article slug is required." });
