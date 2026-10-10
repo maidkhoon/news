@@ -7,6 +7,18 @@ router.use(requireAdmin);
 
 const PLAN_TYPES = new Set(["BASIC_MONTHLY", "BASIC_YEARLY", "PRO_MONTHLY", "PRO_YEARLY"]);
 
+async function audit(req, targetUserId, action, details = {}) {
+  const { error } = await supabase.from("admin_audit_logs").insert({ actor_id: req.authUser.id, target_user_id: targetUserId, action, details });
+  if (error) console.error("Admin audit log write failed:", error.message);
+}
+
+router.get("/me", async (req, res) => {
+  const { data, error } = await supabase.from("profiles").select("id,name,email,phone,role,status,created_at,updated_at").eq("id", req.authUser.id).maybeSingle();
+  if (error) return res.status(500).json({ error: "Unable to load admin profile" });
+  if (!data || data.role !== "ADMIN" || data.status !== true) return res.status(403).json({ error: "Admin access required" });
+  return res.json({ data });
+});
+
 router.get("/users", async (req, res) => {
   const search = String(req.query.search || "").trim().slice(0, 120);
   const { data: profiles, error } = await supabase
@@ -83,6 +95,7 @@ router.patch("/users/:id", async (req, res) => {
     return res.status(500).json({ error: "Unable to update user" });
   }
   if (!data) return res.status(404).json({ error: "User not found" });
+  await audit(req, data.id, updates.status !== undefined ? "USER_STATUS_CHANGED" : "USER_PROFILE_UPDATED", updates);
   return res.json({ data });
 });
 
@@ -122,6 +135,7 @@ router.post("/users/:id/plan", async (req, res) => {
     console.error("Manual plan assignment failed:", error.message);
     return res.status(500).json({ error: "Unable to assign plan" });
   }
+  await audit(req, req.params.id, "PLAN_ASSIGNED", { plan_type: planType, expiry_date: expiry.toISOString(), provider: "admin_manual" });
   return res.status(201).json({ data, note: "Manual entitlement applied; this does not change or charge a Google Play purchase." });
 });
 
@@ -134,6 +148,7 @@ router.post("/users/:id/free-plan", async (req, res) => {
     .update({ status: "EXPIRED", updated_at: new Date().toISOString() })
     .eq("user_id", req.params.id).eq("status", "ACTIVE");
   if (error) return res.status(500).json({ error: "Unable to remove active plan" });
+  await audit(req, req.params.id, "PLAN_REMOVED", { plan_type: "FREE" });
   return res.json({ ok: true, plan_type: "FREE" });
 });
 
