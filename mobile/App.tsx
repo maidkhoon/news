@@ -604,7 +604,7 @@ export default function App() {
     if (filter === 'All' && tab === 'Home' && briefingTopics.length > 0) {
       result = result.filter(article => briefingTopics.some(topic => `${article.categories?.name || ''} ${article.categories?.slug || ''} ${article.title}`.toLowerCase().includes(topic.toLowerCase())))
     }
-    const chosen = tab === 'Crypto' || tab === 'Cricket' || tab === 'Sensex' || tab === 'Nifty 50' ? tab : filter
+    const chosen = tab === 'Crypto' || tab === 'Cricket' ? tab : filter
     if (chosen === 'Crypto') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('crypto') || a.categories?.name?.toLowerCase().includes('crypto'))
     else if (chosen === 'Cricket') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('cricket') || a.categories?.name?.toLowerCase().includes('cricket'))
     else if (chosen === 'India') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('india') || a.categories?.name?.toLowerCase().includes('india'))
@@ -967,9 +967,6 @@ export default function App() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
               {FILTERS.map(item => <Pressable key={item} onPress={() => { setFilter(item); setTab(item === 'Crypto' ? 'Crypto' : item === 'Cricket' ? 'Cricket' : 'Home') }} style={[styles.filterPill, filter === item && tab === 'Home' && styles.filterPillActive]}><Text style={[styles.filterText, filter === item && tab === 'Home' && styles.filterTextActive]}>{item}</Text></Pressable>)}
             </ScrollView>
-            {(tab === 'Sensex' || tab === 'Nifty 50') && (
-              <Text style={styles.sectionNote}>Showing research that mentions “{tab}” by title. This is a text match on existing INDIA/CRYPTO articles, not a dedicated {tab} data feed.</Text>
-            )}
             {feedLoading && articles.length === 0 ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading the newsroom…</Text></View> : null}
             {feedError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Couldn’t load research</Text><Text style={styles.muted}>{feedError}</Text><Pressable onPress={() => loadFeed()} style={styles.retryButton}><Text style={styles.retryText}>Try again</Text></Pressable></View> : null}
             {!feedLoading && !feedError && visibleArticles.length === 0 ? (
