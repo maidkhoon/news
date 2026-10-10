@@ -70,7 +70,7 @@ server.registerTool(
       content: z.string().trim().min(1),
       category_id: z.string().uuid(),
       slug: z.string().trim().max(180).optional(),
-      image_url: z.string().url().nullable().optional(),
+      image_url: z.string().url().refine((value) => ["http:", "https:"].includes(new URL(value).protocol), "image_url must use HTTP or HTTPS").nullable().optional(),
       access_type: z.enum(["FREE", "PREMIUM"]).default("FREE")
     }
   },
@@ -98,10 +98,16 @@ server.registerTool(
     }
   },
   async ({ id, ...changes }) => {
-    const current = await api("/api/admin/articles?page=1&limit=100");
-    const articles = Array.isArray(current.data) ? current.data : [];
-    const article = articles.find((item) => item.id === id);
-    if (!article) throw new Error("Article not found in the first 100 admin results. Locate it in the admin panel before retrying.");
+    let page = 1;
+    let article;
+    while (page <= 10000) {
+      const current = await api("/api/admin/articles?page=" + page + "&limit=100");
+      const articles = Array.isArray(current.data) ? current.data : [];
+      article = articles.find((item) => item.id === id);
+      if (article || !current.pagination?.hasNextPage) break;
+      page += 1;
+    }
+    if (!article) throw new Error("Article not found in the admin article listing. Verify the ID in the admin panel and retry.");
     if (article.status !== "DRAFT") throw new Error("Draft-only safety rule: only articles with status DRAFT can be updated by this MCP tool.");
     const body = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined));
     if (!Object.keys(body).length) throw new Error("Provide at least one field to update.");
