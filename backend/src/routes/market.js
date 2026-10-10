@@ -66,4 +66,73 @@ router.get("/movers", async (req, res) => {
     return res.status(502).json({ error: "Unable to fetch market movers", message: error instanceof Error && error.name === "TimeoutError" ? "Market data provider timed out" : "Market data provider returned an invalid response" });
   }
 });
+
+router.get("/ticker", async (_req, res) => {
+  const cached = cache.get("ticker");
+  if (cached && Date.now() - cached.cachedAt < 60_000) {
+    return res.json({ ...cached.payload, cached: true });
+  }
+
+  try {
+    const cryptoUrl = new URL("https://api.coingecko.com/api/v3/simple/price");
+    cryptoUrl.searchParams.set("ids", "bitcoin,ethereum,solana,dogecoin");
+    cryptoUrl.searchParams.set("vs_currencies", "inr");
+    cryptoUrl.searchParams.set("include_24hr_change", "true");
+    const cryptoResponse = await fetch(cryptoUrl, {
+      signal: AbortSignal.timeout(8_000),
+      headers: { Accept: "application/json" }
+    });
+    if (!cryptoResponse.ok) throw new Error("Crypto market provider request failed");
+    const cryptoPayload = await cryptoResponse.json();
+    const fetchedAt = new Date().toISOString();
+    const cryptoNames = [
+      ["bitcoin", "BTC", "Bitcoin"],
+      ["ethereum", "ETH", "Ethereum"],
+      ["solana", "SOL", "Solana"],
+      ["dogecoin", "DOGE", "Dogecoin"]
+    ];
+    const items = cryptoNames.flatMap(([id, symbol, name]) => {
+      const item = cryptoPayload[id];
+      if (!item || typeof item.inr !== "number") return [];
+      return [{
+        kind: "crypto", symbol, name, price: item.inr,
+        percentChange: typeof item.inr_24h_change === "number" ? item.inr_24h_change : null,
+        currency: "INR", exchange: null, dataTimestamp: null
+      }];
+    });
+
+    // Include exchange movers only when the server has licensed stock-data credentials.
+    const baseUrl = process.env.GLOBAL_DATAFEEDS_BASE_URL?.trim();
+    const accessKey = process.env.GLOBAL_DATAFEEDS_ACCESS_KEY?.trim();
+    if (baseUrl && accessKey) {
+      const stockResults = await Promise.all(["NSE", "BSE"].map(async exchange => {
+        const url = new URL("/GetTopGainersLosers/", baseUrl.endsWith("/") ? baseUrl : baseUrl + "/");
+        url.searchParams.set("accessKey", accessKey);
+        url.searchParams.set("exchange", exchange);
+        url.searchParams.set("count", "5");
+        url.searchParams.set("Series", "EQ");
+        const response = await fetch(url, { signal: AbortSignal.timeout(8_000), headers: { Accept: "application/json" } });
+        if (!response.ok) return [];
+        const payload = await response.json();
+        return parseProviderPayload(payload).map(row => normalizeStock(row, exchange)).filter(Boolean)
+          .slice(0, 5).map(stock => ({
+            kind: "stock", symbol: stock.symbol, name: stock.name, price: stock.price,
+            percentChange: stock.percentChange, currency: "INR", exchange,
+            dataTimestamp: stock.dataTimestamp
+          }));
+      }));
+      items.push(...stockResults.flat());
+    }
+
+    const result = { items, fetchedAt, dataTimestamp: null, refreshSeconds: 60, cached: false };
+    cache.set("ticker", { cachedAt: Date.now(), payload: result });
+    return res.json(result);
+  } catch {
+    return res.status(502).json({
+      error: "Ticker data unavailable",
+      message: "The market ticker could not reach its data provider. Please retry shortly."
+    });
+  }
+});
+
 export default router;
