@@ -9,6 +9,7 @@ import userRoutes from "./routes/users.js";
 import deviceRoutes from "./routes/devices.js";
 import notificationRoutes from "./routes/notifications.js";
 import subscriptionRoutes from "./routes/subscriptions.js";
+import { startNewsIngestionScheduler } from "./lib/news-ingestion.js";
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -44,4 +45,5 @@ app.use((_req, res) => {
 
 app.listen(port, "0.0.0.0", () => {
   console.log(`News API listening on port ${port}`);
+  startNewsIngestionScheduler();
 });
