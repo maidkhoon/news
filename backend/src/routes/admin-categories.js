@@ -19,7 +19,7 @@ function makeSlug(value) {
 router.get("/", async (_req, res) => {
   const { data, error } = await supabase
     .from("categories")
-    .select("id,name,slug,created_at,updated_at")
+    .select("id,name,slug")
     .order("name");
   if (error) {
     console.error("Admin category list failed:", error.message);
@@ -62,8 +62,6 @@ router.patch("/:id", async (req, res) => {
     if (!slug) return res.status(400).json({ error: "A valid category slug is required" });
     payload.slug = slug;
   }
-  payload.updated_at = new Date().toISOString();
-
   const { data, error } = await supabase
     .from("categories")
     .update(payload)
