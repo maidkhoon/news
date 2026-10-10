@@ -10,6 +10,7 @@ import {
   BackHandler,
   FlatList,
   Image,
+  Linking,
   Pressable,
   RefreshControl,
   SafeAreaView,
@@ -31,6 +32,8 @@ type Article = {
   title: string
   slug: string
   image_url?: string | null
+  source_url?: string | null
+  source_name?: string | null
   access_type?: string
   status?: string
   published_at?: string | null
@@ -67,7 +70,7 @@ const NAV_TABS: Tab[] = ['Home', 'Crypto', 'Sensex', 'Nifty 50', 'Cricket']
 const NAV_ICONS = ['⌂', '₿', '▥', '↗', '🏏']
 const FILTERS = ['All', 'India', 'Nifty 50', 'Sensex', 'Crypto', 'Cricket']
 
-// Classifies Supabase auth errors so DNS/offline, rate-limit, and SMS-provider
+// Classifies Supabase auth errors so network, rate-limit, and WhatsApp provider
 // failures show distinct, actionable messages instead of a raw stack trace.
 function describeAuthError(error: unknown): string {
   if (!(error instanceof Error)) return 'Please try again.'
@@ -79,8 +82,8 @@ function describeAuthError(error: unknown): string {
   if (status === 429 || /rate limit|too many/i.test(message)) {
     return 'Too many attempts. Please wait a minute before requesting another OTP.'
   }
-  if (/sms|twilio|provider/i.test(message)) {
-    return 'The SMS provider could not send your OTP right now. Please try again shortly.'
+  if (/whatsapp|sms|twilio|provider|message delivery/i.test(message)) {
+    return 'WhatsApp OTP delivery failed. Check the Supabase Phone provider and Twilio WhatsApp configuration, then try again.'
   }
   return message || 'Please try again.'
 }
@@ -119,7 +122,6 @@ export default function App() {
   const [savedIds, setSavedIds] = useState<string[]>([])
   const [savedLoaded, setSavedLoaded] = useState(false)
   const [briefingTopics, setBriefingTopics] = useState<string[]>(DEFAULT_TOPICS)
-  const [topicsLoaded, setTopicsLoaded] = useState(false)
   const [briefingSummary, setBriefingSummary] = useState<{ bullets: string[]; keyTerms: { term: string; explanation: string }[]; sourceUrl?: string; sourceName?: string } | null>(null)
   const [briefingLoading, setBriefingLoading] = useState(false)
   const [briefingError, setBriefingError] = useState('')
@@ -139,7 +141,7 @@ export default function App() {
         const parsed = JSON.parse(value)
         if (Array.isArray(parsed)) setBriefingTopics(parsed.filter(topic => typeof topic === 'string'))
       }
-    }).catch(() => undefined).finally(() => setTopicsLoaded(true))
+    }).catch(() => undefined)
 
     AsyncStorage.getItem(SAVED_STORAGE_KEY).then(value => {
       if (value) {
@@ -673,6 +675,7 @@ export default function App() {
           <Text style={styles.detailTitle}>{selectedArticle.title}</Text>
           <Text style={styles.articleMeta}>{readableDate(selectedArticle.published_at)}  ·  {selectedArticle.access_type === 'PREMIUM' ? 'Premium' : 'Free'}</Text>
           <Text style={styles.articleBody}>{selectedArticle.content || 'The full article content is not available yet.'}</Text>
+          {selectedArticle.source_url ? <Pressable onPress={() => Linking.openURL(selectedArticle.source_url!).catch(() => Alert.alert('Unable to open source', 'Please try again later.'))} style={styles.sourceLink}><Text style={styles.insightSource}>Read original reporting · {selectedArticle.source_name || 'Publisher'} ↗</Text></Pressable> : null}
           <View style={styles.insightPanel}>
             <Text style={styles.insightTitle}>AI-powered briefing</Text>
             <Text style={styles.muted}>A concise, source-linked summary. AI output may contain errors; check the original reporting.</Text>
@@ -685,7 +688,7 @@ export default function App() {
               {briefingSummary.bullets.map((bullet, index) => <Text key={`${index}-${bullet}`} style={styles.insightBullet}>•  {bullet}</Text>)}
               {briefingSummary.keyTerms.length ? <Text style={styles.insightSubheading}>Key terms</Text> : null}
               {briefingSummary.keyTerms.map(item => <Text key={item.term} style={styles.insightBullet}><Text style={styles.insightTerm}>{item.term}: </Text>{item.explanation}</Text>)}
-              {briefingSummary.sourceUrl ? <Text style={styles.insightSource}>Original source: {briefingSummary.sourceName || 'Publisher'} · {briefingSummary.sourceUrl}</Text> : null}
+              {briefingSummary.sourceUrl ? <Pressable onPress={() => Linking.openURL(briefingSummary.sourceUrl!).catch(() => Alert.alert('Unable to open source', 'Please copy the original source URL from the publisher.'))}><Text style={styles.insightSource}>Open original source: {briefingSummary.sourceName || 'Publisher'} ↗</Text></Pressable> : null}
               <Text style={styles.muted}>AI-generated summary, not investment advice.</Text>
             </> : null}
           </View>
@@ -695,7 +698,8 @@ export default function App() {
             {relatedLoading ? <ActivityIndicator color={COLORS.blue} /> : relatedStories.length ? relatedStories.map(story => <Pressable key={story.id} onPress={() => void openArticle(story)} style={styles.relatedStory}>
               <Text style={styles.articleTag}>{story.categories?.name || 'Research'}</Text>
               <Text style={styles.relatedTitle}>{story.title}</Text>
-              <Text style={styles.articleTime}>{readableDate(story.published_at)} · {story.slug === selectedArticle.slug ? 'Current story' : 'Related coverage'}</Text>
+              <Text style={styles.articleTime}>{story.source_name || story.categories?.name || 'Publisher'} · {readableDate(story.published_at)}</Text>
+              {story.source_url ? <Pressable onPress={() => Linking.openURL(story.source_url!).catch(() => undefined)}><Text style={styles.insightSource}>Compare source ↗</Text></Pressable> : null}
             </Pressable>) : <Text style={styles.muted}>No related coverage found yet. More sources will appear as the newsroom grows.</Text>}
           </View>
           <Text style={styles.disclaimer}>For research and educational purposes only. Not investment advice.</Text>
@@ -1072,6 +1076,7 @@ const styles = StyleSheet.create({
   detailBrand: { color: COLORS.text, fontWeight: '800', fontSize: 16 },
   detailContent: { padding: 18, paddingBottom: 35 },
   insightPanel: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 15, padding: 15, marginTop: 18, gap: 10 },
+  sourceLink: { marginTop: 12, padding: 12, borderWidth: 1, borderColor: COLORS.border, borderRadius: 10 },
   insightTitle: { color: COLORS.text, fontSize: 17, fontWeight: '900' },
   insightSubheading: { color: COLORS.blueLight, fontSize: 13, fontWeight: '900', marginTop: 6 },
   insightBullet: { color: '#D0DDEC', fontSize: 13, lineHeight: 20 },
