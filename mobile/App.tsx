@@ -40,10 +40,14 @@ type Article = {
   content?: string
   categories?: { name?: string; slug?: string } | null
 }
-type Tab = 'Home' | 'Crypto' | 'Sensex' | 'Nifty 50' | 'Cricket'
+type Tab = 'Home' | 'Crypto' | 'NSE' | 'BSE' | 'Cricket'
 type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth'
 type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
+type MarketStock = { symbol: string; name: string; exchange: 'NSE' | 'BSE'; price: number; change: number | null; percentChange: number; volume: number | null; dataTimestamp: string | null }
+type MarketMovers = { exchange: 'NSE' | 'BSE'; count: number; gainers: MarketStock[]; losers: MarketStock[]; fetchedAt: string; dataTimestamp: string | null; cached: boolean }
+type TickerItem = { kind: 'crypto' | 'stock'; symbol: string; name: string; price: number; percentChange: number | null; currency: string; exchange: 'NSE' | 'BSE' | null; dataTimestamp: string | null }
+type MarketTicker = { items: TickerItem[]; fetchedAt: string; refreshSeconds: number; cached: boolean }
 
 const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
 const TOPICS_STORAGE_KEY = 'bazaarnexa:briefing-topics'
@@ -66,8 +70,8 @@ Notifications.setNotificationHandler({
 })
 
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://news-api-egmd.onrender.com').replace(/\/$/, '')
-const NAV_TABS: Tab[] = ['Home', 'Crypto', 'Sensex', 'Nifty 50', 'Cricket']
-const NAV_ICONS = ['⌂', '₿', '▥', '↗', '🏏']
+const NAV_TABS: Tab[] = ['Home', 'Crypto', 'NSE', 'BSE', 'Cricket']
+const NAV_ICONS = ['⌂', '₿', '↗', '▥', '🏏']
 const FILTERS = ['All', 'India', 'Nifty 50', 'Sensex', 'Crypto', 'Cricket']
 
 // Classifies Supabase auth errors so network, rate-limit, and WhatsApp provider
@@ -114,6 +118,13 @@ export default function App() {
   const [feedLoading, setFeedLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [feedError, setFeedError] = useState('')
+  const [marketMovers, setMarketMovers] = useState<MarketMovers | null>(null)
+  const [marketLoading, setMarketLoading] = useState(false)
+  const [marketError, setMarketError] = useState('')
+  const [marketView, setMarketView] = useState<'gainers' | 'losers'>('gainers')
+  const [ticker, setTicker] = useState<MarketTicker | null>(null)
+  const tickerScrollRef = useRef<ScrollView | null>(null)
+  const [tickerContentWidth, setTickerContentWidth] = useState(0)
   const [filter, setFilter] = useState('All')
   const [tab, setTab] = useState<Tab>('Home')
   const [search, setSearch] = useState('')
@@ -247,6 +258,53 @@ export default function App() {
       setLoadingMore(false)
     }
   }, [])
+
+  const loadMarketMovers = useCallback(async (exchange: 'NSE' | 'BSE') => {
+    setMarketLoading(true)
+    setMarketError('')
+    try {
+      const response = await fetch(API_BASE + '/api/market/movers?exchange=' + exchange + '&count=20')
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.message || json.error || 'Market data is temporarily unavailable.')
+      setMarketMovers(json as MarketMovers)
+    } catch (error) {
+      setMarketError(error instanceof Error ? error.message : 'Unable to load market movers.')
+      setMarketMovers(null)
+    } finally { setMarketLoading(false) }
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'NSE' || tab === 'BSE') void loadMarketMovers(tab)
+  }, [tab, loadMarketMovers])
+
+  const loadTicker = useCallback(async () => {
+    try {
+      const response = await fetch(API_BASE + '/api/market/ticker')
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.message || 'Ticker unavailable')
+      setTicker(json as MarketTicker)
+    } catch {
+      // Keep the last successful ticker visible if a refresh fails.
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadTicker()
+    const interval = setInterval(() => void loadTicker(), 60_000)
+    return () => clearInterval(interval)
+  }, [loadTicker])
+
+  useEffect(() => {
+    if (!tickerContentWidth) return
+    let offset = 0
+    const halfWidth = tickerContentWidth / 2
+    const interval = setInterval(() => {
+      offset += 1
+      if (offset >= halfWidth) offset = 0
+      tickerScrollRef.current?.scrollTo({ x: offset, animated: false })
+    }, 35)
+    return () => clearInterval(interval)
+  }, [tickerContentWidth, ticker?.items?.length])
 
   const loadBriefing = async (article: Article) => {
     setBriefingLoading(true)
@@ -580,7 +638,7 @@ export default function App() {
     if (filter === 'All' && tab === 'Home' && briefingTopics.length > 0) {
       result = result.filter(article => briefingTopics.some(topic => `${article.categories?.name || ''} ${article.categories?.slug || ''} ${article.title}`.toLowerCase().includes(topic.toLowerCase())))
     }
-    const chosen = tab === 'Crypto' || tab === 'Cricket' || tab === 'Sensex' || tab === 'Nifty 50' ? tab : filter
+    const chosen = tab === 'Crypto' || tab === 'Cricket' ? tab : filter
     if (chosen === 'Crypto') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('crypto') || a.categories?.name?.toLowerCase().includes('crypto'))
     else if (chosen === 'Cricket') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('cricket') || a.categories?.name?.toLowerCase().includes('cricket'))
     else if (chosen === 'India') result = result.filter(a => a.categories?.slug?.toLowerCase().includes('india') || a.categories?.name?.toLowerCase().includes('india'))
@@ -862,6 +920,17 @@ export default function App() {
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+      <View style={styles.tickerBar}>
+        <Text style={styles.tickerLabel}>LIVE</Text>
+        {ticker?.items?.length ? <ScrollView ref={tickerScrollRef} horizontal showsHorizontalScrollIndicator={false} onContentSizeChange={width => setTickerContentWidth(width)} contentContainerStyle={styles.tickerContent}>
+          {[...ticker.items, ...ticker.items].map((item, index) => <View key={item.kind + '-' + item.exchange + '-' + item.symbol + '-' + index} style={styles.tickerItem}>
+            <Text style={styles.tickerSymbol}>{item.symbol}{item.exchange ? ' · ' + item.exchange : ''}</Text>
+            <Text style={styles.tickerPrice}>{item.currency === 'INR' ? '₹' : ''}{item.price.toLocaleString('en-IN', { maximumFractionDigits: item.price < 100 ? 2 : 0 })}</Text>
+            {item.percentChange !== null ? <Text style={[styles.tickerChange, item.percentChange >= 0 ? styles.moverPositive : styles.moverNegative]}>{item.percentChange >= 0 ? '+' : ''}{item.percentChange.toFixed(2)}%</Text> : null}
+            <Text style={styles.tickerSeparator}>◆</Text>
+          </View>)}
+        </ScrollView> : <Text style={styles.tickerLoading}>Loading market data…</Text>}
+      </View>
       <View style={styles.header}>
         <View style={styles.brandMark}><Text style={styles.brandMarkText}>↗</Text></View>
         <View style={styles.headerCopy}><Text style={styles.headerTitle}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text><Text style={styles.headerSub}>INDIA & CRYPTO RESEARCH</Text></View>
@@ -896,6 +965,27 @@ export default function App() {
         )}
         ListHeaderComponent={
           <>
+            {(tab === 'NSE' || tab === 'BSE') ? (
+              <View style={styles.moversPanel}>
+                <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>INDIAN EQUITY MARKETS</Text><Text style={styles.sectionTitle}>{tab} Top Movers</Text></View><Pressable onPress={() => void loadMarketMovers(tab)} style={styles.retryButton}><Text style={styles.retryText}>Refresh</Text></Pressable></View>
+                <View style={styles.moverTabs}>
+                  <Pressable onPress={() => setMarketView('gainers')} style={[styles.moverTab, marketView === 'gainers' && styles.moverTabActive]}><Text style={[styles.moverTabText, marketView === 'gainers' && styles.moverTabTextActive]}>Top Gainers</Text></Pressable>
+                  <Pressable onPress={() => setMarketView('losers')} style={[styles.moverTab, marketView === 'losers' && styles.moverTabActive]}><Text style={[styles.moverTabText, marketView === 'losers' && styles.moverTabTextActive]}>Top Losers</Text></Pressable>
+                </View>
+                {marketLoading ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading {tab} market movers…</Text></View> : null}
+                {marketError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Market data unavailable</Text><Text style={styles.muted}>{marketError}</Text><Text style={styles.muted}>No sample prices are shown. Configure a licensed provider to enable live data.</Text></View> : null}
+                {!marketLoading && !marketError && marketMovers?.exchange === tab ? <>
+                  <Text style={styles.moverMeta}>Provider snapshot · fetched {new Date(marketMovers.fetchedAt).toLocaleString('en-IN')}</Text>
+                  {marketMovers.dataTimestamp ? <Text style={styles.moverMeta}>Latest provider trade timestamp: {new Date(marketMovers.dataTimestamp).toLocaleString('en-IN')}</Text> : <Text style={styles.moverMeta}>Provider did not supply a trade timestamp.</Text>}
+                  {(marketView === 'gainers' ? marketMovers.gainers : marketMovers.losers).length ? (marketView === 'gainers' ? marketMovers.gainers : marketMovers.losers).map((stock, index) => <View key={stock.exchange + '-' + stock.symbol + '-' + index} style={styles.moverRow}>
+                    <View style={styles.moverRank}><Text style={styles.moverRankText}>{index + 1}</Text></View>
+                    <View style={styles.moverCopy}><Text style={styles.moverName} numberOfLines={1}>{stock.name}</Text><Text style={styles.moverSymbol}>{stock.symbol} · {stock.exchange}{stock.dataTimestamp ? ' · ' + new Date(stock.dataTimestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}</Text></View>
+                    <View style={styles.moverValues}><Text style={styles.moverPrice}>₹{stock.price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Text><Text style={[styles.moverChange, stock.percentChange >= 0 ? styles.moverPositive : styles.moverNegative]}>{stock.percentChange >= 0 ? '+' : ''}{stock.percentChange.toFixed(2)}%</Text></View>
+                  </View>) : <View style={styles.stateCard}><Text style={styles.stateTitle}>No {marketView} data returned</Text><Text style={styles.muted}>The provider may not have data available while the market is closed.</Text></View>}
+                </> : null}
+                <Text style={styles.moverDisclaimer}>Market data may be delayed by the provider. For research only—not investment advice.</Text>
+              </View>
+            ) : null}
             <View style={styles.marketStrip}>
               <View style={styles.marketTile}><Text style={styles.marketEmoji}>🇮🇳</Text><View><Text style={styles.marketName}>INDIA</Text><Text style={styles.marketValue}>Market research</Text></View><Text style={styles.marketArrow}>↗</Text></View>
               <View style={styles.marketTile}><Text style={styles.marketEmoji}>₿</Text><View><Text style={styles.marketName}>CRYPTO</Text><Text style={styles.marketValue}>Digital assets</Text></View><Text style={styles.marketArrow}>↗</Text></View>
@@ -922,9 +1012,6 @@ export default function App() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
               {FILTERS.map(item => <Pressable key={item} onPress={() => { setFilter(item); setTab(item === 'Crypto' ? 'Crypto' : item === 'Cricket' ? 'Cricket' : 'Home') }} style={[styles.filterPill, filter === item && tab === 'Home' && styles.filterPillActive]}><Text style={[styles.filterText, filter === item && tab === 'Home' && styles.filterTextActive]}>{item}</Text></Pressable>)}
             </ScrollView>
-            {(tab === 'Sensex' || tab === 'Nifty 50') && (
-              <Text style={styles.sectionNote}>Showing research that mentions “{tab}” by title. This is a text match on existing INDIA/CRYPTO articles, not a dedicated {tab} data feed.</Text>
-            )}
             {feedLoading && articles.length === 0 ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading the newsroom…</Text></View> : null}
             {feedError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Couldn’t load research</Text><Text style={styles.muted}>{feedError}</Text><Pressable onPress={() => loadFeed()} style={styles.retryButton}><Text style={styles.retryText}>Try again</Text></Pressable></View> : null}
             {!feedLoading && !feedError && visibleArticles.length === 0 ? (
@@ -948,7 +1035,7 @@ export default function App() {
         }
       />
       <View style={styles.bottomNav}>
-        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' || item === 'Cricket' ? item : item === 'Home' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{NAV_ICONS[index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
+        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' || item === 'Cricket' ? item : item === 'Home' || item === 'NSE' || item === 'BSE' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{NAV_ICONS[index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
       </View>
     </SafeAreaView>
   )
@@ -974,6 +1061,25 @@ const styles = StyleSheet.create({
   otpActionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   linkTextDisabled: { color: COLORS.muted },
   sectionNote: { color: COLORS.muted, fontSize: 11, lineHeight: 16, marginBottom: 12 },
+  moversPanel: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 16, padding: 13, marginBottom: 18, marginTop: 10 },
+  moverTabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  moverTab: { flex: 1, borderRadius: 9, paddingVertical: 10, alignItems: 'center', backgroundColor: '#07182B', borderWidth: 1, borderColor: COLORS.border },
+  moverTabActive: { backgroundColor: COLORS.blue, borderColor: COLORS.blue },
+  moverTabText: { color: '#B5C7DC', fontWeight: '800', fontSize: 12 },
+  moverTabTextActive: { color: '#FFFFFF' },
+  moverMeta: { color: COLORS.muted, fontSize: 10, lineHeight: 15, marginBottom: 4 },
+  moverRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  moverRank: { width: 25, height: 25, borderRadius: 8, backgroundColor: COLORS.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  moverRankText: { color: COLORS.muted, fontSize: 10, fontWeight: '800' },
+  moverCopy: { flex: 1 },
+  moverName: { color: COLORS.text, fontSize: 12, fontWeight: '800' },
+  moverSymbol: { color: COLORS.muted, fontSize: 9, marginTop: 4 },
+  moverValues: { alignItems: 'flex-end', gap: 4 },
+  moverPrice: { color: COLORS.text, fontSize: 12, fontWeight: '800' },
+  moverChange: { fontSize: 12, fontWeight: '900' },
+  moverPositive: { color: COLORS.green },
+  moverNegative: { color: '#FF7B88' },
+  moverDisclaimer: { color: COLORS.muted, fontSize: 10, lineHeight: 15, marginTop: 12 }
   loadMoreButton: { marginTop: 4, marginBottom: 14 },
   authScreen: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 22, justifyContent: 'center' },
   authBackButton: { position: 'absolute', top: 54, left: 18, zIndex: 10, padding: 6 },
@@ -1001,6 +1107,15 @@ const styles = StyleSheet.create({
   linkText: { color: COLORS.blueLight, fontWeight: '700' },
   legal: { color: '#829BB6', fontSize: 11, textAlign: 'center', lineHeight: 17, marginTop: 18 },
   disclaimer: { color: '#718AA6', fontSize: 10, textAlign: 'center', lineHeight: 16, marginVertical: 18, paddingHorizontal: 8 },
+  tickerBar: { height: 34, flexDirection: 'row', alignItems: 'center', backgroundColor: '#0C1220', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' },
+  tickerLabel: { color: '#2ED59A', fontSize: 9, fontWeight: '900', letterSpacing: 1, paddingHorizontal: 10 },
+  tickerContent: { alignItems: 'center', paddingRight: 12 },
+  tickerItem: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, height: 34 },
+  tickerSymbol: { color: '#CBD5E1', fontSize: 10, fontWeight: '800' },
+  tickerPrice: { color: '#F8FAFC', fontSize: 10, fontWeight: '700' },
+  tickerChange: { fontSize: 10, fontWeight: '800' },
+  tickerSeparator: { color: '#334155', fontSize: 7, marginLeft: 5 },
+  tickerLoading: { color: '#64748B', fontSize: 10, flex: 1, textAlign: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#112A43', gap: 9 },
   brandMark: { width: 39, height: 39, borderRadius: 11, backgroundColor: '#0752A2', alignItems: 'center', justifyContent: 'center' },
   brandMarkText: { color: '#49D3FF', fontSize: 32, fontWeight: '900', marginTop: -4 },

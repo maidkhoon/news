@@ -12,6 +12,7 @@ import deviceRoutes from "./routes/devices.js";
 import notificationRoutes from "./routes/notifications.js";
 import subscriptionRoutes from "./routes/subscriptions.js";
 import insightRoutes from "./routes/insights.js";
+import marketRoutes from "./routes/market.js";
 import { startNewsIngestionScheduler } from "./lib/news-ingestion.js";
 
 const app = express();
@@ -42,6 +43,7 @@ app.use("/api/devices", deviceRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/insights", insightRoutes);
+app.use("/api/market", marketRoutes);
 app.use("/api/admin/categories", adminCategoryRoutes);
 app.use("/api/admin", adminUserRoutes);
 app.use("/api/admin", adminRoutes);
