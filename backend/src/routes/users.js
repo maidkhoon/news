@@ -1,21 +1,8 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
+import { requireUser } from "../middleware/require-user.js";
 
 const router = Router();
-
-function bearer(req) {
-  const value = req.headers.authorization || "";
-  return value.startsWith("Bearer ") ? value.slice(7) : "";
-}
-
-async function requireUser(req, res, next) {
-  const token = bearer(req);
-  if (!token) return res.status(401).json({ error: "Authentication required" });
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) return res.status(401).json({ error: "Invalid session" });
-  req.authUser = data.user;
-  next();
-}
 
 router.use(requireUser);
 
