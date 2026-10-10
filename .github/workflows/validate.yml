@@ -40,8 +40,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-      - run: npm ci
+      - run: npm install
       - run: node --check src/server.js
       - run: node --check src/routes/insights.js
