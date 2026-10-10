@@ -123,7 +123,6 @@ export default function App() {
   const [marketError, setMarketError] = useState('')
   const [marketView, setMarketView] = useState<'gainers' | 'losers'>('gainers')
   const [ticker, setTicker] = useState<MarketTicker | null>(null)
-  const [tickerUpdatedAt, setTickerUpdatedAt] = useState('')
   const tickerScrollRef = useRef<ScrollView | null>(null)
   const [tickerContentWidth, setTickerContentWidth] = useState(0)
   const [filter, setFilter] = useState('All')
@@ -284,7 +283,6 @@ export default function App() {
       const json = await response.json()
       if (!response.ok) throw new Error(json.message || 'Ticker unavailable')
       setTicker(json as MarketTicker)
-      setTickerUpdatedAt(new Date(json.fetchedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
     } catch {
       // Keep the last successful ticker visible if a refresh fails.
     }
@@ -1037,7 +1035,7 @@ export default function App() {
         }
       />
       <View style={styles.bottomNav}>
-        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' || item === 'Cricket' ? item : item === 'Home' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{NAV_ICONS[index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
+        {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' || item === 'Cricket' ? item : item === 'Home' || item === 'NSE' || item === 'BSE' ? 'All' : item) }} style={styles.navItem}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{NAV_ICONS[index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
       </View>
     </SafeAreaView>
   )
