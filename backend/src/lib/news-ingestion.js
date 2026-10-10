@@ -121,19 +121,30 @@ export async function ingestNewsFeed(feed) {
   return { category: feed.slug, fetched: externalArticles.length, inserted, skipped };
 }
 
+let ingestionRunning = false;
+
 export async function runNewsIngestion() {
   if (!process.env.GNEWS_API_KEY) {
     console.warn("News ingestion is disabled: GNEWS_API_KEY is not configured");
     return;
   }
+  if (ingestionRunning) {
+    console.warn("News ingestion skipped: previous run still in progress");
+    return;
+  }
 
-  for (const feed of FEEDS) {
-    try {
-      const result = await ingestNewsFeed(feed);
-      console.log("News ingestion complete:", result);
-    } catch (error) {
-      console.error(`News ingestion failed for ${feed.slug}:`, error?.message || error);
+  ingestionRunning = true;
+  try {
+    for (const feed of FEEDS) {
+      try {
+        const result = await ingestNewsFeed(feed);
+        console.log("News ingestion complete:", result);
+      } catch (error) {
+        console.error(`News ingestion failed for ${feed.slug}:`, error?.message || error);
+      }
     }
+  } finally {
+    ingestionRunning = false;
   }
 }
 
