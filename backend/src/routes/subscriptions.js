@@ -1,39 +1,9 @@
 import { Router } from "express";
 import { google } from "googleapis";
 import { supabase } from "../lib/supabase.js";
+import { requireUser } from "../middleware/require-user.js";
 
 const router = Router();
-
-async function requireUser(req, res, next) {
-  const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!token) return res.status(401).json({ error: "Authentication required" });
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) return res.status(401).json({ error: "Invalid session" });
-  req.authUser = data.user;
-  next();
-}
-
-async function ensureProfile(user) {
-  const { data: profile, error: lookupError } = await supabase.from("profiles")
-    .select("id").eq("id", user.id).maybeSingle();
-  if (lookupError) throw lookupError;
-  if (profile) {
-    const { error } = await supabase.from("profiles").update({
-      phone: user.phone || null,
-      email: user.email || null,
-      updated_at: new Date().toISOString()
-    }).eq("id", user.id);
-    if (error) throw error;
-    return;
-  }
-  const { error } = await supabase.from("profiles").insert({
-    id: user.id,
-    phone: user.phone || null,
-    email: user.email || null
-  });
-  if (error) throw error;
-}
 
 router.use(requireUser);
 
