@@ -38,8 +38,8 @@ app.use("/api/users", userRoutes);
 app.use("/api/devices", deviceRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
-app.use("/api/admin", adminRoutes);
 app.use("/api/admin/categories", adminCategoryRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: "Route not found" });
