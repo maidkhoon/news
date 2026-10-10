@@ -418,13 +418,34 @@ function App() {
         <footer className="page-footer"><span>NEWSROOM ADMIN</span><span>Write with clarity. Publish with confidence.</span></footer>
       </main>
 
+      {categoryEditorOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setCategoryEditorOpen(false); }}>
+        <section className="editor-modal category-editor-modal" role="dialog" aria-modal="true" aria-labelledby="category-editor-title">
+          <div className="modal-header"><div><p className="eyebrow">TAXONOMY</p><h2 id="category-editor-title">{editingCategoryId ? "Edit category" : "Create a category"}</h2></div><button className="icon-button close-button" onClick={() => setCategoryEditorOpen(false)} aria-label="Close category editor">×</button></div>
+          <form onSubmit={saveCategory} className="editor-form">
+            <label>Category name<input value={categoryForm.name} onChange={(e) => setCategoryForm((current) => ({ ...current, name: e.target.value }))} maxLength="80" placeholder="e.g. Technology" required /></label>
+            <label>Slug <span className="optional-label">Lowercase URL identifier</span><input value={categoryForm.slug} onChange={(e) => setCategoryForm((current) => ({ ...current, slug: e.target.value }))} placeholder="technology" /></label>
+            <p className="muted">Changing a slug changes the category filter used by the mobile app and news ingestion.</p>
+            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setCategoryEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={categorySaving}>{categorySaving ? "Saving…" : editingCategoryId ? "Save category" : "Create category"}</button></div>
+          </form>
+        </section>
+      </div>}
+
       {editorOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditorOpen(false); }}>
         <section className="editor-modal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
           <div className="modal-header"><div><p className="eyebrow">{editingId ? "CONTENT EDITOR" : "NEW CONTENT"}</p><h2 id="editor-title">{editingId ? "Edit article" : "Create an article"}</h2></div><button className="icon-button close-button" onClick={() => setEditorOpen(false)} aria-label="Close editor">×</button></div>
           <form onSubmit={saveArticle} className="editor-form">
             <label>Article title<input name="title" value={form.title} onChange={changeForm} maxLength="240" placeholder="Write a clear, specific headline" required /></label>
             <div className="form-two-col"><label>Category<select name="category_id" value={form.category_id} onChange={changeForm} required><option value="">Choose category</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Content access<select name="access_type" value={form.access_type} onChange={changeForm}><option value="FREE">Free</option><option value="PREMIUM">Premium</option></select></label></div>
-            <label>Cover image URL <span className="optional-label">Optional</span><input type="url" name="image_url" value={form.image_url} onChange={changeForm} placeholder="https://example.com/image.jpg" /></label>
+            <div className="image-upload-panel">
+              <div className="image-upload-heading"><div><strong>Cover image</strong><p>Upload, resize and crop before saving the article.</p></div><span className="optional-label">Optional</span></div>
+              <div className="form-two-col">
+                <label>Output size<select value={imagePreset} onChange={(e) => setImagePreset(e.target.value)}><option value="1200x675">1200 × 675 · Article cover</option><option value="1600x900">1600 × 900 · High resolution</option><option value="800x800">800 × 800 · Square</option></select></label>
+                <label>Resize mode<select value={imageMode} onChange={(e) => setImageMode(e.target.value)}><option value="cover">Fill & crop</option><option value="contain">Fit entire image</option></select></label>
+              </div>
+              <label className="upload-dropzone"><span className="upload-icon">↑</span><span>{imageUploading ? "Processing and uploading…" : "Choose image from your computer"}</span><small>JPG, PNG or WebP · original max 10 MB</small><input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadCoverImage} disabled={imageUploading} /></label>
+              {(imagePreview || form.image_url) && <div className="cover-preview"><img src={imagePreview || form.image_url} alt="Cover preview" /><button type="button" className="secondary-button" onClick={() => { setForm((current) => ({ ...current, image_url: "" })); setImagePreview(""); }}>Remove image</button></div>}
+              <label>Or paste an image URL<input type="url" name="image_url" value={form.image_url} onChange={(e) => { changeForm(e); setImagePreview(""); }} placeholder="https://example.com/image.jpg" /></label>
+            </div>
             <label>Article content<textarea name="content" value={form.content} onChange={changeForm} rows="10" placeholder="Write your article or research here…" required /></label>
             <label>Publishing status<select name="status" value={form.status} onChange={changeForm}><option value="DRAFT">Save as draft</option><option value="PUBLISHED">Publish now</option><option value="UNPUBLISHED">Unpublished</option></select></label>
             <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes" : "Create article"}</button></div>
