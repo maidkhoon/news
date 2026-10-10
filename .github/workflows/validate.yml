@@ -44,6 +44,7 @@ jobs:
           node-version: 22
       - run: npm install
       - run: node --check src/server.js
+      - run: node --check src/routes/admin.js
       - run: node --check src/routes/insights.js
 
   mcp-check:
