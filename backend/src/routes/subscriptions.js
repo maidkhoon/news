@@ -129,7 +129,18 @@ router.post("/verify-google-play", async (req, res) => {
     } else if (referral) {
       const rewardDays = Math.max(1, Math.min(365, Number(referral.reward_days || process.env.REFERRAL_REWARD_DAYS || 7)));
       const rewardStart = new Date();
-      const rewardExpiry = new Date(rewardStart.getTime() + rewardDays * 24 * 60 * 60 * 1000);
+      const { data: currentEntitlement, error: entitlementError } = await supabase.from("subscriptions")
+        .select("expiry_date")
+        .eq("user_id", referral.referrer_user_id)
+        .eq("status", "ACTIVE")
+        .gt("expiry_date", rewardStart.toISOString())
+        .order("expiry_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (entitlementError) console.error("Existing premium expiry lookup failed:", entitlementError.message);
+      const currentExpiry = currentEntitlement?.expiry_date ? new Date(currentEntitlement.expiry_date) : rewardStart;
+      const rewardBase = currentExpiry > rewardStart ? currentExpiry : rewardStart;
+      const rewardExpiry = new Date(rewardBase.getTime() + rewardDays * 24 * 60 * 60 * 1000);
       const { error: rewardError } = await supabase.from("subscriptions").insert({
         user_id: referral.referrer_user_id,
         plan_type: "REFERRAL_REWARD",
