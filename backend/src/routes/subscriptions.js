@@ -2,6 +2,7 @@ import { Router } from "express";
 import { google } from "googleapis";
 import { supabase } from "../lib/supabase.js";
 import { requireUser } from "../middleware/require-user.js";
+import { ensureProfile } from "../lib/profiles.js";
 
 const router = Router();
 
