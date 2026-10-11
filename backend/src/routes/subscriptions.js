@@ -117,6 +117,43 @@ router.post("/verify-google-play", async (req, res) => {
       .single();
 
     if (error) throw error;
+    // Award the inviter only after this referred account has a Google Play purchase
+    // verified by the Play Developer API. The unique referral_id prevents duplicate grants.
+    const { data: referral, error: referralLookupError } = await supabase.from("referrals")
+      .select("id,referrer_user_id,reward_days,status")
+      .eq("referred_user_id", req.authUser.id)
+      .eq("status", "pending")
+      .maybeSingle();
+    if (referralLookupError) {
+      console.error("Referral reward lookup failed:", referralLookupError.message);
+    } else if (referral) {
+      const rewardDays = Math.max(1, Math.min(365, Number(referral.reward_days || process.env.REFERRAL_REWARD_DAYS || 7)));
+      const rewardStart = new Date();
+      const rewardExpiry = new Date(rewardStart.getTime() + rewardDays * 24 * 60 * 60 * 1000);
+      const { error: rewardError } = await supabase.from("subscriptions").insert({
+        user_id: referral.referrer_user_id,
+        plan_type: "REFERRAL_REWARD",
+        product_id: null,
+        purchase_token: null,
+        provider: "referral",
+        status: "ACTIVE",
+        start_date: rewardStart.toISOString(),
+        expiry_date: rewardExpiry.toISOString(),
+        auto_renewing: false,
+        referral_id: referral.id,
+        updated_at: rewardStart.toISOString()
+      });
+      if (!rewardError || rewardError.code === "23505") {
+        await supabase.from("referrals").update({
+          status: "rewarded",
+          paid_subscription_at: new Date().toISOString(),
+          rewarded_at: new Date().toISOString()
+        }).eq("id", referral.id).eq("status", "pending");
+      } else {
+        console.error("Referral reward grant failed:", rewardError.message);
+      }
+    }
+
     return res.json({ data, active: true });
   } catch (error) {
     console.error("Google Play verification failed:", error instanceof Error ? error.message : error);
