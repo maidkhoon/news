@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as ExpoLinking from 'expo-linking'
+import * as WebBrowser from 'expo-web-browser'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Constants from 'expo-constants'
 import * as Device from 'expo-device'
@@ -14,6 +16,7 @@ import {
   Pressable,
   RefreshControl,
   SafeAreaView,
+  Share,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -41,7 +44,8 @@ type Article = {
   categories?: { name?: string; slug?: string } | null
 }
 type Tab = 'Home' | 'Crypto' | 'NSE' | 'BSE' | 'Cricket'
-type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth'
+type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth' | 'referrals'
+type ReferralSummary = { code: string; link: string; rewardDays: number; successful: number; pending: number; referrals: Array<{ id: string; status: string; created_at: string; rewarded_at?: string | null }>; appliedReferral: { status: string; reward_days: number; rewarded_at?: string | null } | null }
 type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
 type MarketStock = { symbol: string; name: string; exchange: 'NSE' | 'BSE'; price: number; change: number | null; percentChange: number; volume: number | null; dataTimestamp: string | null }
@@ -59,6 +63,8 @@ const PLAY_PRODUCTS = {
   PRO_MONTHLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_PRO_MONTHLY_PRODUCT_ID || '',
   PRO_YEARLY: process.env.EXPO_PUBLIC_GOOGLE_PLAY_PRO_YEARLY_PRODUCT_ID || '',
 }
+
+WebBrowser.maybeCompleteAuthSession()
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -118,6 +124,9 @@ export default function App() {
   const [otp, setOtp] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
   const [resendCooldown, setResendCooldown] = useState(0)
+  const [referralSummary, setReferralSummary] = useState<ReferralSummary | null>(null)
+  const [referralInput, setReferralInput] = useState('')
+  const [referralLoading, setReferralLoading] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [articles, setArticles] = useState<Article[]>([])
   const [page, setPage] = useState(1)
@@ -181,6 +190,94 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
+  const signInWithGoogle = async () => {
+    if (authLoading) return
+    setAuthLoading(true)
+    try {
+      const redirectTo = ExpoLinking.createURL('auth/callback')
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo, skipBrowserRedirect: true },
+      })
+      if (error) throw error
+      if (!data.url) throw new Error('Google sign-in URL was not returned.')
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo)
+      if (result.type !== 'success' || !result.url) {
+        if (result.type === 'cancel' || result.type === 'dismiss') return
+        throw new Error('Google sign-in was not completed. Please try again.')
+      }
+      const callbackUrl = new URL(result.url)
+      const code = callbackUrl.searchParams.get('code')
+      if (!code) {
+        const message = callbackUrl.searchParams.get('error_description') || callbackUrl.searchParams.get('error')
+        throw new Error(message || 'Google sign-in callback did not contain an authorization code.')
+      }
+      const { data: authData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+      if (exchangeError) throw exchangeError
+      if (referralInput.trim()) await loadReferralSummary(authData.session?.access_token)
+      else setScreen('home')
+    } catch (error) {
+      Alert.alert('Google sign-in failed', error instanceof Error ? error.message : 'Unable to sign in with Google.')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const loadReferralSummary = async (accessToken?: string) => {
+    const token = accessToken || session?.access_token
+    if (!token) {
+      promptSignIn('Sign in to view and use your referral code.')
+      return
+    }
+    setReferralLoading(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/referrals/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error || 'Unable to load referral information.')
+      setReferralSummary(json.data)
+      setScreen('referrals')
+    } catch (error) {
+      Alert.alert('Referral program unavailable', error instanceof Error ? error.message : 'Please try again.')
+    } finally {
+      setReferralLoading(false)
+    }
+  }
+
+  const claimReferralCode = async () => {
+    if (!session?.access_token) {
+      promptSignIn('Sign in before applying a referral code.')
+      return
+    }
+    const code = referralInput.trim().toUpperCase()
+    if (!code) {
+      Alert.alert('Referral code required', 'Enter the code shared by your friend.')
+      return
+    }
+    setReferralLoading(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/referrals/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ code })
+      })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error || 'Unable to apply referral code.')
+      setReferralInput('')
+      Alert.alert('Referral code applied', json.message || 'Your friend can earn premium days after your first paid subscription.')
+      const summaryResponse = await fetch(`${API_BASE}/api/referrals/me`, { headers: { Authorization: `Bearer ${session.access_token}` } })
+      if (summaryResponse.ok) {
+        const summaryJson = await summaryResponse.json()
+        setReferralSummary(summaryJson.data)
+      }
+    } catch (error) {
+      Alert.alert('Could not apply code', error instanceof Error ? error.message : 'Please try again.')
+    } finally {
+      setReferralLoading(false)
+    }
+  }
+
   const normalizedPhone = () => {
     const digits = phone.replace(/\D/g, '')
     if (digits.length !== 10) throw new Error('Enter a valid 10-digit mobile number.')
@@ -216,15 +313,32 @@ export default function App() {
       setAuthLoading(true)
       const formattedPhone = normalizedPhone()
       if (!/^\d{6}$/.test(otp)) throw new Error('Enter the 6-digit OTP.')
-      const { error } = await supabase.auth.verifyOtp({ phone: formattedPhone, token: otp, type: 'sms' })
+      const { data: authData, error } = await supabase.auth.verifyOtp({ phone: formattedPhone, token: otp, type: 'sms' })
       if (error) throw error
-      setScreen('home')
+      if (referralInput.trim()) await loadReferralSummary(authData.session?.access_token)
+      else setScreen('home')
     } catch (error) {
       Alert.alert('OTP verification failed', describeAuthError(error))
     } finally {
       setAuthLoading(false)
     }
   }
+
+  useEffect(() => {
+    const handleReferralUrl = (url: string) => {
+      const parsed = ExpoLinking.parse(url)
+      const pathCode = url.match(/(?:\/\/ref\/|\/ref\/)([A-F0-9]{10})(?:[/?#]|$)/i)?.[1] || String(parsed.path || '').match(/(?:^|\/)ref\/([A-F0-9]{10})$/i)?.[1]
+      const queryCode = typeof parsed.queryParams?.ref === 'string' ? parsed.queryParams.ref : ''
+      const code = (pathCode || queryCode).toUpperCase()
+      if (!/^[A-F0-9]{10}$/.test(code)) return
+      setReferralInput(code)
+      if (session?.access_token) void loadReferralSummary()
+      else setScreen('auth')
+    }
+    ExpoLinking.getInitialURL().then(url => { if (url) handleReferralUrl(url) }).catch(() => undefined)
+    const subscription = ExpoLinking.addEventListener('url', ({ url }) => handleReferralUrl(url))
+    return () => subscription.remove()
+  }, [session?.access_token])
 
   // Guests can browse freely; this only opens the optional sign-in screen.
   const openSignIn = useCallback(() => {
@@ -706,6 +820,14 @@ export default function App() {
           <Text style={styles.authTitle}>{step === 'phone' ? 'Welcome back' : 'Verify your number'}</Text>
           <Text style={styles.authSubtitle}>{step === 'phone' ? 'Log in to continue to BazaarNexa' : `Enter the 6-digit OTP sent to +91 ${phone}`}</Text>
           {step === 'phone' ? (
+            <>
+              <Pressable style={[styles.primaryButton, styles.googleButton, authLoading && styles.disabled]} onPress={signInWithGoogle} disabled={authLoading}>
+                {authLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>G  Continue with Google</Text>}
+              </Pressable>
+              <View style={styles.authDivider}><View style={styles.authDividerLine} /><Text style={styles.authDividerText}>OR CONTINUE WITH PHONE</Text><View style={styles.authDividerLine} /></View>
+            </>
+          ) : null}
+          {step === 'phone' ? (
             <View style={styles.phoneRow}>
               <View style={styles.countryCode}><Text style={styles.countryCodeText}>🇮🇳  +91</Text></View>
               <TextInput value={phone} onChangeText={v => setPhone(v.replace(/\D/g, '').slice(0, 10))} keyboardType="phone-pad" placeholder="Enter your mobile number" placeholderTextColor={COLORS.muted} maxLength={10} style={styles.authInput} editable={!authLoading} />
@@ -727,6 +849,46 @@ export default function App() {
           <Text style={styles.legal}>By continuing, you agree to our Terms & Conditions and Privacy Policy.</Text>
         </View>
         <Text style={styles.disclaimer}>Research and educational content only. Not investment advice.</Text>
+      </SafeAreaView>
+    )
+  }
+
+  if (screen === 'referrals') {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <View style={styles.detailHeader}>
+          <Pressable onPress={() => setScreen('home')} style={styles.backButton} hitSlop={12}><Text style={styles.backText}>‹  Back</Text></Pressable>
+          <Text style={styles.detailBrand}>Referral Program</Text>
+          <View style={{ width: 48 }} />
+        </View>
+        <ScrollView contentContainerStyle={styles.detailContent}>
+          <Text style={styles.detailTitle}>Invite friends. Earn premium days.</Text>
+          <Text style={styles.muted}>Your friend must apply your code before their first paid subscription. Once their first purchase is verified, you earn {referralSummary?.rewardDays || 7} free premium days.</Text>
+          <View style={styles.referralCard}>
+            <Text style={styles.referralLabel}>YOUR REFERRAL CODE</Text>
+            <Text style={styles.referralCode}>{referralSummary?.code || 'Loading…'}</Text>
+            <Pressable style={styles.primaryButton} onPress={() => referralSummary?.code ? Share.share({ message: `Join me on BazaarNexa! Use my referral code ${referralSummary.code}. Open ${referralSummary.link} or enter the code in the app before your first paid subscription.` }) : undefined}>
+              <Text style={styles.primaryButtonText}>Share invite</Text>
+            </Pressable>
+          </View>
+          <View style={styles.referralStatsRow}>
+            <View style={styles.referralStat}><Text style={styles.referralStatValue}>{referralSummary?.successful ?? 0}</Text><Text style={styles.muted}>Successful</Text></View>
+            <View style={styles.referralStat}><Text style={styles.referralStatValue}>{referralSummary?.pending ?? 0}</Text><Text style={styles.muted}>Pending purchase</Text></View>
+          </View>
+          <Text style={styles.sectionTitle}>Have a referral code?</Text>
+          {referralSummary?.appliedReferral ? (
+            <Text style={styles.muted}>Referral already applied to this account ({referralSummary.appliedReferral.status}).</Text>
+          ) : (
+            <>
+              <TextInput value={referralInput} onChangeText={v => setReferralInput(v.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 10))} autoCapitalize="characters" placeholder="Enter 10-character code" placeholderTextColor={COLORS.muted} style={styles.authInput} maxLength={10} editable={!referralLoading} />
+              <Pressable style={[styles.primaryButton, referralLoading && styles.disabled]} onPress={claimReferralCode} disabled={referralLoading}>
+                {referralLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Apply referral code</Text>}
+              </Pressable>
+            </>
+          )}
+          <Text style={styles.legal}>Referral rewards are granted only after a referred user completes their first verified Google Play subscription purchase. Self-referrals and duplicate claims are blocked.</Text>
+        </ScrollView>
       </SafeAreaView>
     )
   }
@@ -950,7 +1112,7 @@ export default function App() {
         <Pressable onPress={() => { setSearchOpen(open => !open); setSearch('') }} style={styles.headerIcon} accessibilityRole="button" accessibilityLabel="Search"><Text style={styles.headerIconText}>⌕</Text></Pressable>
         <Pressable onPress={() => { setScreen('notifications'); if (session) void loadNotifications() }} style={styles.headerIcon} accessibilityRole="button" accessibilityLabel="Notifications"><Text style={styles.headerIconText}>♧</Text></Pressable>
         {session ? (
-          <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || 'member'), [{ text: 'Close' }, { text: 'Saved articles', onPress: () => setScreen('saved') }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar} accessibilityRole="button" accessibilityLabel="Account menu"><Text style={styles.avatarText}>●</Text></Pressable>
+          <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || session.user.email || 'member'), [{ text: 'Close' }, { text: 'Referral program', onPress: () => { void loadReferralSummary() } }, { text: 'Saved articles', onPress: () => setScreen('saved') }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar} accessibilityRole="button" accessibilityLabel="Account menu"><Text style={styles.avatarText}>●</Text></Pressable>
         ) : (
           <Pressable onPress={openSignIn} style={styles.signInPill} accessibilityRole="button" accessibilityLabel="Sign in"><Text style={styles.signInPillText}>Sign in</Text></Pressable>
         )}
@@ -1119,6 +1281,16 @@ const styles = StyleSheet.create({
   tagline: { color: '#C4D5E8', fontSize: 14, marginTop: 4 },
   featureRow: { flexDirection: 'row', gap: 16, marginTop: 22 },
   feature: { color: '#AFC5DF', fontSize: 11 },
+  googleButton: { backgroundColor: '#202124', marginBottom: 14 },
+  authDivider: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
+  authDividerLine: { flex: 1, height: 1, backgroundColor: '#273244' },
+  authDividerText: { color: '#8492A6', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  referralCard: { backgroundColor: '#111C2C', borderWidth: 1, borderColor: '#26364B', borderRadius: 18, padding: 20, marginVertical: 18, gap: 12 },
+  referralLabel: { color: '#8FA2B9', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
+  referralCode: { color: '#FFFFFF', fontSize: 30, fontWeight: '800', letterSpacing: 3, marginVertical: 6 },
+  referralStatsRow: { flexDirection: 'row', gap: 12, marginVertical: 12 },
+  referralStat: { flex: 1, backgroundColor: '#111C2C', borderRadius: 14, padding: 16, gap: 6 },
+  referralStatValue: { color: '#FFFFFF', fontSize: 26, fontWeight: '800' },
   authCard: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 24, padding: 22 },
   authTitle: { color: COLORS.text, fontSize: 25, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
   authSubtitle: { color: COLORS.muted, fontSize: 14, textAlign: 'center', lineHeight: 21, marginBottom: 23 },
