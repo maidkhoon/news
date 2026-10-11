@@ -56,7 +56,7 @@ router.get("/me", async (req, res) => {
     return res.json({
       data: {
         code: profile.referral_code,
-        link: `https://bazaarnexa.com/?ref=${encodeURIComponent(profile.referral_code || "")}`,
+        link: `bazaarnexa://ref/${encodeURIComponent(profile.referral_code || "")}`,
         rewardDays: Number(process.env.REFERRAL_REWARD_DAYS || 7),
         referrals: referrals || [],
         successful: (referrals || []).filter((item) => item.status === "rewarded").length,
@@ -105,7 +105,6 @@ router.post("/claim", async (req, res) => {
       .select("id")
       .eq("user_id", userId)
       .eq("provider", "google_play")
-      .eq("status", "ACTIVE")
       .limit(1)
       .maybeSingle();
     if (paidError) throw paidError;
