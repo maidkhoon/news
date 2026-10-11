@@ -3,7 +3,12 @@ import { supabase } from "../lib/supabase.js";
 
 const router = Router();
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
-const MODEL = process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct";
+// meta/llama-3.3-70b-instruct reached end of life on 2026-08-26 (NVIDIA now returns
+// HTTP 410 Gone for it). nvidia/nemotron-3-super-120b-a12b is confirmed current on
+// NVIDIA's public API catalog as of this change, but has not been verified against
+// the production NVIDIA_API_KEY/account — see docs/WHATSAPP-OTP-SETUP.md. Override
+// with NVIDIA_MODEL if the configured account doesn't have access to it.
+const MODEL = process.env.NVIDIA_MODEL || "nvidia/nemotron-3-super-120b-a12b";
 const requestWindows = new Map();
 
 function overBriefingLimit(key) {
@@ -13,6 +18,28 @@ function overBriefingLimit(key) {
   recent.push(now);
   requestWindows.set(key, recent);
   return recent.length > 8;
+}
+
+// Maps an NVIDIA provider HTTP status to a safe client-facing response and a
+// short tag for server-side logs, without ever echoing provider response
+// bodies (which could contain account/billing details) back to the client.
+export function classifyProviderFailure(providerStatus) {
+  if (providerStatus === 401 || providerStatus === 403) {
+    return { httpStatus: 503, error: "AI briefings are temporarily unavailable due to a provider authentication issue.", logTag: "auth" };
+  }
+  if (providerStatus === 404) {
+    return { httpStatus: 502, error: "The AI briefing provider could not find the configured model.", logTag: "model-not-found" };
+  }
+  if (providerStatus === 410) {
+    return { httpStatus: 502, error: "The AI briefing provider retired the configured model. An operator needs to update NVIDIA_MODEL.", logTag: "model-retired" };
+  }
+  if (providerStatus === 429) {
+    return { httpStatus: 503, error: "The AI briefing provider is rate-limited right now. Please try again shortly.", logTag: "provider-rate-limited" };
+  }
+  if (providerStatus >= 500) {
+    return { httpStatus: 502, error: "The AI briefing provider is temporarily unavailable.", logTag: "provider-5xx" };
+  }
+  return { httpStatus: 502, error: "The AI briefing provider returned an unexpected response.", logTag: "provider-unexpected" };
 }
 
 function significantWords(value) {
@@ -59,8 +86,9 @@ router.post("/summary", async (req, res) => {
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      console.error("NVIDIA briefing request failed:", response.status, detail.slice(0, 300));
-      return res.status(502).json({ error: "The AI briefing provider is temporarily unavailable." });
+      const failure = classifyProviderFailure(response.status);
+      console.error(`NVIDIA briefing request failed [${failure.logTag}] model=${MODEL}:`, response.status, detail.slice(0, 300));
+      return res.status(failure.httpStatus).json({ error: failure.error });
     }
     const payload = await response.json();
     const content = payload?.choices?.[0]?.message?.content;
@@ -74,6 +102,10 @@ router.post("/summary", async (req, res) => {
     if (!bullets.length) throw new Error("AI provider returned an empty summary");
     return res.json({ data: { bullets, keyTerms, sourceUrl: article.source_url || null, sourceName: article.source_name || "Original publisher", model: MODEL, generatedAt: new Date().toISOString() } });
   } catch (err) {
+    if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+      console.error(`AI briefing request timed out model=${MODEL}`);
+      return res.status(504).json({ error: "The AI briefing provider took too long to respond. Please try again." });
+    }
     console.error("AI briefing failed:", err?.message || err);
     return res.status(502).json({ error: "Could not generate a reliable briefing. Please try again." });
   }

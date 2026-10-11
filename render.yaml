@@ -28,3 +28,7 @@ services:
         sync: false
       - key: GOOGLE_PLAY_PRO_YEARLY_PRODUCT_ID
         sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: NVIDIA_MODEL
+        sync: false
