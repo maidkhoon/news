@@ -214,7 +214,8 @@ export default function App() {
       }
       const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
       if (exchangeError) throw exchangeError
-      setScreen('home')
+      if (referralInput.trim()) await loadReferralSummary()
+      else setScreen('home')
     } catch (error) {
       Alert.alert('Google sign-in failed', error instanceof Error ? error.message : 'Unable to sign in with Google.')
     } finally {
@@ -313,13 +314,30 @@ export default function App() {
       if (!/^\d{6}$/.test(otp)) throw new Error('Enter the 6-digit OTP.')
       const { error } = await supabase.auth.verifyOtp({ phone: formattedPhone, token: otp, type: 'sms' })
       if (error) throw error
-      setScreen('home')
+      if (referralInput.trim()) await loadReferralSummary()
+      else setScreen('home')
     } catch (error) {
       Alert.alert('OTP verification failed', describeAuthError(error))
     } finally {
       setAuthLoading(false)
     }
   }
+
+  useEffect(() => {
+    const handleReferralUrl = (url: string) => {
+      const parsed = ExpoLinking.parse(url)
+      const pathCode = String(parsed.path || '').match(/(?:^|\/)ref\/([A-F0-9]{10})$/i)?.[1]
+      const queryCode = typeof parsed.queryParams?.ref === 'string' ? parsed.queryParams.ref : ''
+      const code = (pathCode || queryCode).toUpperCase()
+      if (!/^[A-F0-9]{10}$/.test(code)) return
+      setReferralInput(code)
+      if (session?.access_token) void loadReferralSummary()
+      else setScreen('auth')
+    }
+    ExpoLinking.getInitialURL().then(url => { if (url) handleReferralUrl(url) }).catch(() => undefined)
+    const subscription = ExpoLinking.addEventListener('url', ({ url }) => handleReferralUrl(url))
+    return () => subscription.remove()
+  }, [session?.access_token])
 
   // Guests can browse freely; this only opens the optional sign-in screen.
   const openSignIn = useCallback(() => {
