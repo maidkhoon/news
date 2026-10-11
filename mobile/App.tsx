@@ -212,9 +212,9 @@ export default function App() {
         const message = callbackUrl.searchParams.get('error_description') || callbackUrl.searchParams.get('error')
         throw new Error(message || 'Google sign-in callback did not contain an authorization code.')
       }
-      const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+      const { data: authData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
       if (exchangeError) throw exchangeError
-      if (referralInput.trim()) await loadReferralSummary()
+      if (referralInput.trim()) await loadReferralSummary(authData.session?.access_token)
       else setScreen('home')
     } catch (error) {
       Alert.alert('Google sign-in failed', error instanceof Error ? error.message : 'Unable to sign in with Google.')
@@ -223,15 +223,16 @@ export default function App() {
     }
   }
 
-  const loadReferralSummary = async () => {
-    if (!session?.access_token) {
+  const loadReferralSummary = async (accessToken?: string) => {
+    const token = accessToken || session?.access_token
+    if (!token) {
       promptSignIn('Sign in to view and use your referral code.')
       return
     }
     setReferralLoading(true)
     try {
       const response = await fetch(`${API_BASE}/api/referrals/me`, {
-        headers: { Authorization: `Bearer ${session.access_token}` }
+        headers: { Authorization: `Bearer ${token}` }
       })
       const json = await response.json()
       if (!response.ok) throw new Error(json.error || 'Unable to load referral information.')
@@ -312,9 +313,9 @@ export default function App() {
       setAuthLoading(true)
       const formattedPhone = normalizedPhone()
       if (!/^\d{6}$/.test(otp)) throw new Error('Enter the 6-digit OTP.')
-      const { error } = await supabase.auth.verifyOtp({ phone: formattedPhone, token: otp, type: 'sms' })
+      const { data: authData, error } = await supabase.auth.verifyOtp({ phone: formattedPhone, token: otp, type: 'sms' })
       if (error) throw error
-      if (referralInput.trim()) await loadReferralSummary()
+      if (referralInput.trim()) await loadReferralSummary(authData.session?.access_token)
       else setScreen('home')
     } catch (error) {
       Alert.alert('OTP verification failed', describeAuthError(error))
