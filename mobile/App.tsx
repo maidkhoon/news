@@ -849,7 +849,7 @@ export default function App() {
           <View style={styles.referralCard}>
             <Text style={styles.referralLabel}>YOUR REFERRAL CODE</Text>
             <Text style={styles.referralCode}>{referralSummary?.code || 'Loading…'}</Text>
-            <Pressable style={styles.primaryButton} onPress={() => referralSummary?.code ? Share.share({ message: `Join me on BazaarNexa! Use my referral code ${referralSummary.code}. Apply it before your first paid subscription.` }) : undefined}>
+            <Pressable style={styles.primaryButton} onPress={() => referralSummary?.code ? Share.share({ message: `Join me on BazaarNexa! Use my referral code ${referralSummary.code}. Open ${referralSummary.link} or enter the code in the app before your first paid subscription.` }) : undefined}>
               <Text style={styles.primaryButtonText}>Share invite</Text>
             </Pressable>
           </View>
