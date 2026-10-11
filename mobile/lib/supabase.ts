@@ -18,6 +18,10 @@ export const supabase = createClient(supabaseUrl || 'https://placeholder.invalid
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    // Required for signInWithOAuth() + exchangeCodeForSession() on native: without
+    // this, the client defaults to the implicit flow and GoTrue never issues a
+    // `code` param, so the callback has nothing for exchangeCodeForSession to use.
+    flowType: 'pkce',
   },
 })
 

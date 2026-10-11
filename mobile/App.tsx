@@ -27,6 +27,7 @@ import {
 } from 'react-native'
 import type { Session } from '@supabase/supabase-js'
 import { supabase, supabaseConfigError } from './lib/supabase'
+import { parseGoogleAuthCallback } from './lib/googleAuthCallback'
 
 type AuthStep = 'phone' | 'otp'
 type Category = { id: string; name: string; slug: string }
@@ -202,17 +203,10 @@ export default function App() {
       if (error) throw error
       if (!data.url) throw new Error('Google sign-in URL was not returned.')
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo)
-      if (result.type !== 'success' || !result.url) {
-        if (result.type === 'cancel' || result.type === 'dismiss') return
-        throw new Error('Google sign-in was not completed. Please try again.')
-      }
-      const callbackUrl = new URL(result.url)
-      const code = callbackUrl.searchParams.get('code')
-      if (!code) {
-        const message = callbackUrl.searchParams.get('error_description') || callbackUrl.searchParams.get('error')
-        throw new Error(message || 'Google sign-in callback did not contain an authorization code.')
-      }
-      const { data: authData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+      const callback = parseGoogleAuthCallback(result, redirectTo)
+      if (callback.type === 'cancelled') return
+      if (callback.type === 'error' || callback.type === 'unexpected') throw new Error(callback.message)
+      const { data: authData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(callback.code)
       if (exchangeError) throw exchangeError
       if (referralInput.trim()) await loadReferralSummary(authData.session?.access_token)
       else setScreen('home')
