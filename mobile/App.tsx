@@ -327,7 +327,7 @@ export default function App() {
   useEffect(() => {
     const handleReferralUrl = (url: string) => {
       const parsed = ExpoLinking.parse(url)
-      const pathCode = String(parsed.path || '').match(/(?:^|\/)ref\/([A-F0-9]{10})$/i)?.[1]
+      const pathCode = url.match(/(?:\/\/ref\/|\/ref\/)([A-F0-9]{10})(?:[/?#]|$)/i)?.[1] || String(parsed.path || '').match(/(?:^|\/)ref\/([A-F0-9]{10})$/i)?.[1]
       const queryCode = typeof parsed.queryParams?.ref === 'string' ? parsed.queryParams.ref : ''
       const code = (pathCode || queryCode).toUpperCase()
       if (!/^[A-F0-9]{10}$/.test(code)) return
