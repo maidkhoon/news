@@ -1,4 +1,5 @@
 name: Validate BazaarNexa
+# Keep mobile dependency installation compatible with repositories without a committed lockfile.
 
 on:
   pull_request:
