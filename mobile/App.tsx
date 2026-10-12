@@ -874,7 +874,8 @@ export default function App() {
           <View style={styles.logo}><Text style={styles.logoGlyph}>↗</Text><Text style={styles.logoBars}>▥</Text></View>
           <Text style={styles.wordmark}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text>
           <Text style={styles.tagline}>India & Crypto Research</Text>
-          <View style={styles.featureRow}><Text style={styles.feature}>▤  In-depth articles</Text><Text style={styles.feature}>▥  Market insights</Text></View>
+          <Text style={styles.authBrandPromise}>Smarter market insights. All in one place.</Text>
+          <View style={styles.featureGrid}><View style={styles.featureRow}><Text style={styles.feature}>▤  Investment articles</Text><Text style={styles.feature}>↗  Market analysis</Text></View><View style={styles.featureRow}><Text style={styles.feature}>◈  Easy insights</Text><Text style={styles.feature}>♧  Referral rewards</Text></View></View>
         </View>
         <View style={styles.authCard}>
           <Text style={styles.authTitle}>{step === 'phone' ? 'Welcome back' : 'Verify your number'}</Text>
@@ -1433,8 +1434,10 @@ const styles = StyleSheet.create({
   wordmark: { color: '#FFFFFF', fontSize: 31, fontWeight: '800', letterSpacing: -1 },
   wordmarkBlue: { color: COLORS.blueLight },
   tagline: { color: '#C4D5E8', fontSize: 14, marginTop: 4 },
-  featureRow: { flexDirection: 'row', gap: 16, marginTop: 22 },
-  feature: { color: '#AFC5DF', fontSize: 11 },
+  authBrandPromise: { color: '#7FADE0', fontSize: 11, marginTop: 8, textAlign: 'center' },
+  featureGrid: { marginTop: 20, gap: 10, alignItems: 'center' },
+  featureRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 14 },
+  feature: { color: '#C2D5EC', fontSize: 11, fontWeight: '700' },
   googleButton: { backgroundColor: '#202124', marginBottom: 14 },
   authDivider: { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 10 },
   authDividerLine: { flex: 1, height: 1, backgroundColor: '#273244' },
