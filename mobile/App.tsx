@@ -1331,8 +1331,8 @@ export default function App() {
                   <Pressable onPress={() => setCryptoView('losers')} style={[styles.moverTab, cryptoView === 'losers' && styles.moverTabActive]}><Text style={[styles.moverTabText, cryptoView === 'losers' && styles.moverTabTextActive]}>Top Losers</Text></Pressable>
                 </View>
                 {cryptoLoading ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading crypto market movers…</Text></View> : null}
-                {cryptoError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Crypto data unavailable</Text><Text style={styles.muted}>{cryptoError}</Text><Text style={styles.muted}>No sample prices are shown. Please retry shortly.</Text></View> : null}
-                {!cryptoLoading && !cryptoError && cryptoMovers ? (
+                {cryptoError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>{cryptoMovers ? 'Refresh failed · showing last successful snapshot' : 'Crypto data unavailable'}</Text><Text style={styles.muted}>{cryptoError}</Text><Text style={styles.muted}>{cryptoMovers ? 'Values below may be out of date. Check the fetched time before using them.' : 'No sample prices are shown. Please retry shortly.'}</Text></View> : null}
+                {!cryptoLoading && cryptoMovers ? (
                   (cryptoView === 'gainers' ? cryptoMovers.gainers : cryptoMovers.losers).length ? (cryptoView === 'gainers' ? cryptoMovers.gainers : cryptoMovers.losers).map((coin, index) => (
                     <View key={coin.id} style={styles.moverRow}>
                       <View style={styles.moverRank}><Text style={styles.moverRankText}>{index + 1}</Text></View>
@@ -1353,8 +1353,8 @@ export default function App() {
                   <Pressable onPress={() => setMarketView('losers')} style={[styles.moverTab, marketView === 'losers' && styles.moverTabActive]}><Text style={[styles.moverTabText, marketView === 'losers' && styles.moverTabTextActive]}>Top Losers</Text></Pressable>
                 </View>
                 {marketLoading ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading {tab} market movers…</Text></View> : null}
-                {marketError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Market data unavailable</Text><Text style={styles.muted}>{marketError}</Text><Text style={styles.muted}>No sample prices are shown. Configure a licensed provider to enable live data.</Text></View> : null}
-                {!marketLoading && !marketError && marketMovers?.exchange === tab ? <>
+                {marketError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>{marketMovers?.exchange === tab ? 'Refresh failed · showing last successful snapshot' : 'Market data unavailable'}</Text><Text style={styles.muted}>{marketError}</Text><Text style={styles.muted}>{marketMovers?.exchange === tab ? 'Values below may be out of date. Check the fetched time before using them.' : 'No sample prices are shown. Configure a licensed provider to enable live data.'}</Text></View> : null}
+                {!marketLoading && marketMovers?.exchange === tab ? <>
                   <Text style={styles.moverMeta}>Provider snapshot · fetched {new Date(marketMovers.fetchedAt).toLocaleString('en-IN')}</Text>
                   {marketMovers.dataTimestamp ? <Text style={styles.moverMeta}>Latest provider trade timestamp: {new Date(marketMovers.dataTimestamp).toLocaleString('en-IN')}</Text> : <Text style={styles.moverMeta}>Provider did not supply a trade timestamp.</Text>}
                   {(marketView === 'gainers' ? marketMovers.gainers : marketMovers.losers).length ? (marketView === 'gainers' ? marketMovers.gainers : marketMovers.losers).map((stock, index) => <View key={stock.exchange + '-' + stock.symbol + '-' + index} style={styles.moverRow}>
