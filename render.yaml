@@ -30,5 +30,11 @@ services:
         sync: false
       - key: NVIDIA_API_KEY
         sync: false
+      - key: INDIANAPI_API_KEY
+        sync: false
+      - key: INDIANAPI_BASE_URL
+        value: "https://stock.indianapi.in"
+      - key: REFERRAL_REWARD_DAYS
+        value: "7"
       - key: NVIDIA_MODEL
         sync: false
