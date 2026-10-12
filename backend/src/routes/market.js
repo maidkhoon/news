@@ -155,6 +155,58 @@ router.get("/movers", async (req, res) => {
   }
 });
 
+
+router.get("/crypto-movers", async (req, res) => {
+  const parsedCount = Number.parseInt(String(req.query.count || "20"), 10);
+  const count = Math.min(20, Math.max(1, Number.isFinite(parsedCount) ? parsedCount : 20));
+  const cached = cache.get(`crypto-movers:${count}`);
+  if (cached && Date.now() - cached.cachedAt < TICKER_CACHE_TTL_MS) {
+    return res.json({ ...cached.payload, cached: true });
+  }
+  try {
+    const url = new URL("https://api.coingecko.com/api/v3/coins/markets");
+    url.searchParams.set("vs_currency", "inr");
+    url.searchParams.set("order", "market_cap_desc");
+    url.searchParams.set("per_page", "100");
+    url.searchParams.set("page", "1");
+    url.searchParams.set("sparkline", "false");
+    url.searchParams.set("price_change_percentage", "24h");
+    const response = await fetch(url, { signal: AbortSignal.timeout(10_000), headers: { Accept: "application/json" } });
+    if (!response.ok) {
+      const status = response.status === 429 ? 429 : 502;
+      return res.status(status).json({
+        error: "Crypto market data unavailable",
+        message: status === 429 ? "Crypto data provider rate limit reached. Please retry shortly." : "The crypto data provider returned an error. Please retry shortly."
+      });
+    }
+    const payload = await response.json();
+    if (!Array.isArray(payload)) throw new Error("Invalid crypto market response");
+    const coins = payload.filter(coin =>
+      typeof coin?.id === "string" && typeof coin?.name === "string" &&
+      typeof coin?.current_price === "number" && typeof coin?.price_change_percentage_24h === "number"
+    ).map(coin => ({
+      id: coin.id, symbol: String(coin.symbol || "").toUpperCase(), name: coin.name,
+      image: typeof coin.image === "string" ? coin.image : null,
+      price: coin.current_price, percentChange: coin.price_change_percentage_24h,
+      marketCap: typeof coin.market_cap === "number" ? coin.market_cap : null,
+      marketCapRank: typeof coin.market_cap_rank === "number" ? coin.market_cap_rank : null
+    }));
+    const result = {
+      count, currency: "INR", period: "24h",
+      gainers: [...coins].sort((a, b) => b.percentChange - a.percentChange).slice(0, count),
+      losers: [...coins].sort((a, b) => a.percentChange - b.percentChange).slice(0, count),
+      fetchedAt: new Date().toISOString(), provider: "CoinGecko", cached: false
+    };
+    cache.set(`crypto-movers:${count}`, { cachedAt: Date.now(), payload: result });
+    return res.json(result);
+  } catch (error) {
+    return res.status(502).json({
+      error: "Crypto market data unavailable",
+      message: error?.name === "TimeoutError" ? "The crypto data provider timed out. Please retry shortly." : "Unable to fetch crypto market movers. Please retry shortly."
+    });
+  }
+});
+
 router.get("/ticker", async (_req, res) => {
   const cached = cache.get("ticker");
   if (cached && Date.now() - cached.cachedAt < TICKER_CACHE_TTL_MS) {
