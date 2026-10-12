@@ -1258,7 +1258,7 @@ export default function App() {
                   <View><Text style={styles.eyebrow}>CRYPTOCURRENCY MARKET</Text><Text style={styles.sectionTitle}>Top Crypto Movers</Text></View>
                   <Pressable onPress={() => void loadCryptoMovers()} style={styles.retryButton} accessibilityRole="button" accessibilityLabel="Refresh crypto movers"><Text style={styles.retryText}>Refresh</Text></Pressable>
                 </View>
-                <Text style={styles.moverMeta}>Top 20 by 24-hour price change · INR · Provider snapshot</Text>
+                <Text style={styles.moverMeta}>Top 20 by 24-hour change among the 100 largest coins · INR</Text>
                 {cryptoMovers?.fetchedAt ? <Text style={styles.moverMeta}>Fetched {new Date(cryptoMovers.fetchedAt).toLocaleString('en-IN')} · {cryptoMovers.provider}{cryptoMovers.cached ? ' · cached' : ''}</Text> : null}
                 <View style={styles.moverTabs}>
                   <Pressable onPress={() => setCryptoView('gainers')} style={[styles.moverTab, cryptoView === 'gainers' && styles.moverTabActive]}><Text style={[styles.moverTabText, cryptoView === 'gainers' && styles.moverTabTextActive]}>Top Gainers</Text></Pressable>
