@@ -45,7 +45,7 @@ type Article = {
   categories?: { name?: string; slug?: string } | null
 }
 type Tab = 'Home' | 'Crypto' | 'NSE' | 'BSE' | 'Cricket'
-type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth' | 'referrals' | 'profile'
+type AppScreen = 'home' | 'plans' | 'payment' | 'purchase-success' | 'notifications' | 'saved' | 'auth' | 'referrals' | 'profile'
 type ReferralSummary = { code: string; link: string; rewardDays: number; successful: number; pending: number; referrals: Array<{ id: string; status: string; created_at: string; rewarded_at?: string | null }>; appliedReferral: { status: string; reward_days: number; rewarded_at?: string | null } | null }
 type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
@@ -160,7 +160,7 @@ export default function App() {
   const [briefingError, setBriefingError] = useState('')
   const [relatedStories, setRelatedStories] = useState<Article[]>([])
   const [relatedLoading, setRelatedLoading] = useState(false)
-  const [screen, setScreen] = useState<AppScreen>('home')
+  const [screen, setScreen] = useState<AppScreen>('auth')
   const [notificationItems, setNotificationItems] = useState<NewsNotification[]>([])
   const [notificationsLoading, setNotificationsLoading] = useState(false)
   const [activeSubscription, setActiveSubscription] = useState<Subscription | null>(null)
@@ -185,8 +185,9 @@ export default function App() {
 
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
+      setScreen(data.session ? 'home' : 'auth')
       setInitializing(false)
-    }).catch(() => setInitializing(false))
+    }).catch(() => { setScreen('auth'); setInitializing(false) })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession)
@@ -612,8 +613,7 @@ export default function App() {
         if (!response.ok) throw new Error(json.message || json.error || 'Google Play could not verify this purchase.')
         await finishTransactionRef.current?.({ purchase, isConsumable: false })
         setActiveSubscription(json.data || null)
-        setScreen('home')
-        Alert.alert('Subscription activated', 'Your BazaarNexa premium access is now active.')
+        setScreen('purchase-success')
         void loadMemberData(session.access_token)
       } catch (error) {
         Alert.alert('Purchase verification failed', error instanceof Error ? error.message : 'Please contact support. Do not purchase again until this transaction is resolved.')
@@ -795,6 +795,10 @@ export default function App() {
       }
       if (screen === 'payment') {
         setScreen('plans')
+        return true
+      }
+      if (screen === 'purchase-success') {
+        setScreen('home')
         return true
       }
       if (screen !== 'home') {
@@ -1054,6 +1058,35 @@ export default function App() {
     )
   }
 
+
+  if (screen === 'purchase-success') {
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
+        <ScrollView contentContainerStyle={styles.purchaseSuccessContent}>
+          <View style={styles.successBrandLogo}><Text style={styles.successBrandArrow}>↗</Text><Text style={styles.successBrandBars}>▥</Text></View>
+          <View style={styles.successCheck}><Text style={styles.successCheckGlyph}>✓</Text></View>
+          <Text style={styles.purchaseSuccessEyebrow}>BAZAARNEXA PREMIUM</Text>
+          <Text style={styles.purchaseSuccessTitle}>You’re all set!</Text>
+          <Text style={styles.purchaseSuccessSubtitle}>Your purchase has been verified. Premium research is ready for you.</Text>
+          <View style={styles.purchaseSuccessCard}>
+            <Text style={styles.purchaseSuccessCardLabel}>YOUR PLAN</Text>
+            <Text style={styles.purchaseSuccessPlan}>{activeSubscription?.plan_type || chosenPlan + '_' + planCycle.toUpperCase()}</Text>
+            {activeSubscription?.expiry_date ? <Text style={styles.muted}>Access until {formatExpiry(activeSubscription.expiry_date)}</Text> : <Text style={styles.muted}>Subscription status verified by BazaarNexa</Text>}
+          </View>
+          <View style={styles.successNextList}>
+            <Text style={styles.successNextTitle}>What’s next?</Text>
+            <Text style={styles.successNextItem}>✓  Explore premium market research</Text>
+            <Text style={styles.successNextItem}>✓  Read in-depth company and sector analysis</Text>
+            <Text style={styles.successNextItem}>✓  Manage your plan from your profile</Text>
+          </View>
+          <Pressable onPress={() => setScreen('home')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Explore BazaarNexa  →</Text></Pressable>
+          <Text style={styles.disclaimer}>Your purchase is verified through Google Play. Manage renewals in Google Play subscriptions.</Text>
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
   if (screen === 'plans' || screen === 'payment') {
     const basicKey = `BASIC_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
     const proKey = `PRO_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
@@ -1095,6 +1128,7 @@ export default function App() {
                 <Pressable onPress={() => choosePlan('BASIC')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Choose Basic  →</Text></Pressable>
               </View>
               <View style={[styles.planCard, chosenPlan === 'PRO' && styles.planCardSelected]}>
+                <View style={styles.popularPlanBadge}><Text style={styles.popularPlanBadgeText}>MOST POPULAR</Text></View>
                 <View style={styles.planTitleRow}><Text style={styles.planName}>Pro</Text><Text style={styles.planPrice}>{proPrice}</Text></View>
                 {['Everything in Basic', 'In-depth research reports', 'Company and sector deep-dives', 'Global market context', 'Early access to special reports', 'Access across devices'].map(item => <Text key={item} style={styles.planFeature}>✓  {item}</Text>)}
                 <Pressable onPress={() => choosePlan('PRO')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Choose Pro  →</Text></Pressable>
@@ -1386,6 +1420,24 @@ const styles = StyleSheet.create({
   moverRank: { width: 25, height: 25, borderRadius: 8, backgroundColor: COLORS.surfaceLight, alignItems: 'center', justifyContent: 'center' },
   moverRankText: { color: COLORS.muted, fontSize: 10, fontWeight: '800' },
   cryptoCoinImage: { width: 26, height: 26, borderRadius: 13 },
+
+  popularPlanBadge: { alignSelf: 'flex-start', backgroundColor: '#123D37', borderColor: '#246F5E', borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 10 },
+  popularPlanBadgeText: { color: '#5BE0B0', fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+  purchaseSuccessContent: { flexGrow: 1, paddingHorizontal: 24, paddingVertical: 36, alignItems: 'center', justifyContent: 'center', gap: 15 }
+  successBrandLogo: { width: 64, height: 64, borderRadius: 19, backgroundColor: '#073C78', borderWidth: 1, borderColor: '#197FE4', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  successBrandArrow: { color: '#42C6FF', fontSize: 42, fontWeight: '900', position: 'absolute', top: 0, right: 10 },
+  successBrandBars: { color: '#FFFFFF', fontSize: 26, fontWeight: '900', position: 'absolute', bottom: 5, left: 12 },
+  successCheck: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#123D37', borderWidth: 1, borderColor: '#2ED59A', alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  successCheckGlyph: { color: '#2ED59A', fontSize: 38, fontWeight: '900' },
+  purchaseSuccessEyebrow: { color: COLORS.blueLight, fontSize: 11, fontWeight: '900', letterSpacing: 2, marginTop: 4 },
+  purchaseSuccessTitle: { color: COLORS.text, fontSize: 30, fontWeight: '900', textAlign: 'center' },
+  purchaseSuccessSubtitle: { color: COLORS.muted, fontSize: 14, lineHeight: 21, textAlign: 'center', maxWidth: 310 },
+  purchaseSuccessCard: { width: '100%', backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1, borderRadius: 18, padding: 18, gap: 8, marginTop: 8 },
+  purchaseSuccessCardLabel: { color: COLORS.muted, fontSize: 10, fontWeight: '900', letterSpacing: 1.4 },
+  purchaseSuccessPlan: { color: COLORS.text, fontSize: 19, fontWeight: '900' },
+  successNextList: { width: '100%', backgroundColor: '#091B2E', borderRadius: 16, padding: 16, gap: 12 },
+  successNextTitle: { color: COLORS.text, fontSize: 15, fontWeight: '900', marginBottom: 2 },
+  successNextItem: { color: '#C4D5E8', fontSize: 12, lineHeight: 18 },
   profileContent: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 34, gap: 16 },
   profileHero: { alignItems: 'center', backgroundColor: '#0C2742', borderColor: COLORS.border, borderWidth: 1, borderRadius: 22, paddingVertical: 26, paddingHorizontal: 18 },
   profileAvatar: { width: 76, height: 76, borderRadius: 38, backgroundColor: '#0B63C7', borderWidth: 3, borderColor: '#3BA5FF', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
