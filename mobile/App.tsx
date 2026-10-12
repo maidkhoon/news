@@ -1423,7 +1423,7 @@ const styles = StyleSheet.create({
 
   popularPlanBadge: { alignSelf: 'flex-start', backgroundColor: '#123D37', borderColor: '#246F5E', borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 10 },
   popularPlanBadgeText: { color: '#5BE0B0', fontSize: 9, fontWeight: '900', letterSpacing: 1 },
-  purchaseSuccessContent: { flexGrow: 1, paddingHorizontal: 24, paddingVertical: 36, alignItems: 'center', justifyContent: 'center', gap: 15 }
+  purchaseSuccessContent: { flexGrow: 1, paddingHorizontal: 24, paddingVertical: 36, alignItems: 'center', justifyContent: 'center', gap: 15 },
   successBrandLogo: { width: 64, height: 64, borderRadius: 19, backgroundColor: '#073C78', borderWidth: 1, borderColor: '#197FE4', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   successBrandArrow: { color: '#42C6FF', fontSize: 42, fontWeight: '900', position: 'absolute', top: 0, right: 10 },
   successBrandBars: { color: '#FFFFFF', fontSize: 26, fontWeight: '900', position: 'absolute', bottom: 5, left: 12 },
