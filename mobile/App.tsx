@@ -913,6 +913,58 @@ export default function App() {
     )
   }
 
+  if (screen === 'profile') {
+    const displayName = profile?.name || profileName || session?.user.user_metadata?.full_name || session?.user.email?.split('@')[0] || 'BazaarNexa member'
+    const joined = session?.user.created_at ? new Date(session.user.created_at).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : '—'
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} translucent={false} />
+        <View style={styles.detailHeader}>
+          <Pressable onPress={() => setScreen('home')} style={styles.backButton} hitSlop={12}><Text style={styles.backText}>‹  Back</Text></Pressable>
+          <Text style={styles.detailBrand}>My Profile</Text>
+          <View style={{ width: 48 }} />
+        </View>
+        <ScrollView contentContainerStyle={styles.profileContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.profileHero}>
+            <View style={styles.profileAvatar}><Text style={styles.profileAvatarText}>{displayName.charAt(0).toUpperCase()}</Text></View>
+            <Text style={styles.profileName}>{displayName}</Text>
+            <Text style={styles.profileSubtitle}>BazaarNexa member</Text>
+            <View style={styles.profileMemberBadge}><Text style={styles.profileMemberBadgeText}>{activeSubscription ? '✦ PREMIUM MEMBER' : '✓ ACCOUNT ACTIVE'}</Text></View>
+          </View>
+          <View style={styles.profileSection}>
+            <Text style={styles.profileSectionTitle}>Personal information</Text>
+            <Text style={styles.profileFieldLabel}>Full name</Text>
+            <TextInput value={profileName} onChangeText={setProfileName} placeholder="Enter your full name" placeholderTextColor={COLORS.muted} style={styles.profileInput} maxLength={80} autoCapitalize="words" editable={!profileSaving} />
+            <Text style={styles.profileHelp}>Use the name you want shown on your BazaarNexa account.</Text>
+            <Text style={styles.profileFieldLabel}>Email address</Text>
+            <View style={styles.profileReadOnly}><Text style={styles.profileReadOnlyText}>{profile?.email || session?.user.email || 'Not provided'}</Text><Text style={styles.profileReadOnlyBadge}>SIGN-IN ACCOUNT</Text></View>
+            <Text style={styles.profileFieldLabel}>Mobile number</Text>
+            <View style={styles.profileReadOnly}><Text style={styles.profileReadOnlyText}>{profile?.phone || session?.user.phone || 'Not linked'}</Text><Text style={styles.profileReadOnlyBadge}>SIGN-IN ACCOUNT</Text></View>
+            {profileError ? <Text style={styles.profileError}>{profileError}</Text> : null}
+            <Pressable onPress={saveProfile} disabled={profileSaving || profileLoading} style={[styles.primaryButton, (profileSaving || profileLoading) && styles.disabled]}>
+              {profileSaving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Save changes  →</Text>}
+            </Pressable>
+            {profileLoading ? <ActivityIndicator color={COLORS.blue} style={{ marginTop: 12 }} /> : null}
+          </View>
+          <View style={styles.profileSection}>
+            <Text style={styles.profileSectionTitle}>Your BazaarNexa</Text>
+            <Pressable onPress={() => setScreen('plans')} style={styles.profileAction}><View style={styles.profileActionIcon}><Text style={styles.profileActionGlyph}>✦</Text></View><View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Subscription & plans</Text><Text style={styles.profileActionSubtitle}>{activeSubscription ? activeSubscription.plan_type + ' · expires ' + formatExpiry(activeSubscription.expiry_date) : 'Explore Basic and Pro membership'}</Text></View><Text style={styles.profileActionArrow}>›</Text></Pressable>
+            <Pressable onPress={() => setScreen('saved')} style={styles.profileAction}><View style={styles.profileActionIcon}><Text style={styles.profileActionGlyph}>▣</Text></View><View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Saved articles</Text><Text style={styles.profileActionSubtitle}>{savedIds.length} saved for later</Text></View><Text style={styles.profileActionArrow}>›</Text></Pressable>
+            <Pressable onPress={() => { void loadReferralSummary() }} style={styles.profileAction}><View style={styles.profileActionIcon}><Text style={styles.profileActionGlyph}>↗</Text></View><View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Referral rewards</Text><Text style={styles.profileActionSubtitle}>Invite friends and view rewards</Text></View><Text style={styles.profileActionArrow}>›</Text></Pressable>
+            <Pressable onPress={() => { setScreen('notifications'); void loadNotifications() }} style={styles.profileAction}><View style={styles.profileActionIcon}><Text style={styles.profileActionGlyph}>♧</Text></View><View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Notifications</Text><Text style={styles.profileActionSubtitle}>Market alerts and research updates</Text></View><Text style={styles.profileActionArrow}>›</Text></Pressable>
+          </View>
+          <View style={styles.profileSection}>
+            <Text style={styles.profileSectionTitle}>Account</Text>
+            <View style={styles.profileMetaRow}><Text style={styles.profileMetaLabel}>Member since</Text><Text style={styles.profileMetaValue}>{joined}</Text></View>
+            <View style={styles.profileMetaRow}><Text style={styles.profileMetaLabel}>Account ID</Text><Text style={styles.profileMetaValue}>{session?.user.id ? session.user.id.slice(0, 8).toUpperCase() : '—'}</Text></View>
+            <Pressable onPress={() => Alert.alert('Sign out', 'Sign out of BazaarNexa on this device?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: () => { void signOut() } }])} style={styles.signOutButton}><Text style={styles.signOutText}>Sign out</Text></Pressable>
+          </View>
+          <Text style={styles.disclaimer}>Your account details are handled securely. Contact support if you need help with your account.</Text>
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
   if (screen === 'referrals') {
     return (
       <SafeAreaView style={styles.screen}>
@@ -1315,8 +1367,8 @@ const COLORS = {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: COLORS.background },
-  loadingScreen: { flex: 1, backgroundColor: COLORS.background, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  screen: { flex: 1, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0, backgroundColor: COLORS.background },
+  loadingScreen: { flex: 1, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0, backgroundColor: COLORS.background, alignItems: 'center', justifyContent: 'center', gap: 12 },
   muted: { color: COLORS.muted, fontSize: 13, lineHeight: 20 },
   configErrorText: { textAlign: 'center', paddingHorizontal: 24 },
   otpActionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -1332,6 +1384,36 @@ const styles = StyleSheet.create({
   moverRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   moverRank: { width: 25, height: 25, borderRadius: 8, backgroundColor: COLORS.surfaceLight, alignItems: 'center', justifyContent: 'center' },
   moverRankText: { color: COLORS.muted, fontSize: 10, fontWeight: '800' },
+  cryptoCoinImage: { width: 26, height: 26, borderRadius: 13 },
+  profileContent: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 34, gap: 16 },
+  profileHero: { alignItems: 'center', backgroundColor: '#0C2742', borderColor: COLORS.border, borderWidth: 1, borderRadius: 22, paddingVertical: 26, paddingHorizontal: 18 },
+  profileAvatar: { width: 76, height: 76, borderRadius: 38, backgroundColor: '#0B63C7', borderWidth: 3, borderColor: '#3BA5FF', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  profileAvatarText: { color: '#FFFFFF', fontSize: 32, fontWeight: '900' },
+  profileName: { color: COLORS.text, fontSize: 22, fontWeight: '900', textAlign: 'center' },
+  profileSubtitle: { color: COLORS.muted, fontSize: 13, marginTop: 5 },
+  profileMemberBadge: { marginTop: 14, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: '#123D37', borderWidth: 1, borderColor: '#246F5E' },
+  profileMemberBadgeText: { color: '#5BE0B0', fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  profileSection: { backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1, borderRadius: 18, padding: 17, gap: 10 },
+  profileSectionTitle: { color: COLORS.text, fontSize: 16, fontWeight: '900', marginBottom: 4 },
+  profileFieldLabel: { color: '#B5C7DC', fontSize: 12, fontWeight: '800', marginTop: 5 },
+  profileInput: { minHeight: 50, backgroundColor: '#07182B', borderWidth: 1, borderColor: '#45617F', borderRadius: 12, paddingHorizontal: 13, color: COLORS.text, fontSize: 15 },
+  profileHelp: { color: COLORS.muted, fontSize: 11, lineHeight: 16 },
+  profileReadOnly: { backgroundColor: '#07182B', borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, padding: 12, gap: 5 },
+  profileReadOnlyText: { color: COLORS.text, fontSize: 14 },
+  profileReadOnlyBadge: { color: COLORS.muted, fontSize: 8, letterSpacing: 1, fontWeight: '800' },
+  profileError: { color: '#FF8994', fontSize: 12, lineHeight: 18 },
+  profileAction: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  profileActionIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#123B60', alignItems: 'center', justifyContent: 'center' },
+  profileActionGlyph: { color: COLORS.blueLight, fontSize: 20, fontWeight: '900' },
+  profileActionCopy: { flex: 1, gap: 4 },
+  profileActionTitle: { color: COLORS.text, fontSize: 13, fontWeight: '800' },
+  profileActionSubtitle: { color: COLORS.muted, fontSize: 11, lineHeight: 15 },
+  profileActionArrow: { color: COLORS.muted, fontSize: 25 },
+  profileMetaRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  profileMetaLabel: { color: COLORS.muted, fontSize: 12 },
+  profileMetaValue: { color: COLORS.text, fontSize: 12, fontWeight: '700' },
+  signOutButton: { borderColor: '#803B4A', borderWidth: 1, borderRadius: 12, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  signOutText: { color: '#FF8994', fontSize: 14, fontWeight: '800' },
   moverCopy: { flex: 1 },
   moverName: { color: COLORS.text, fontSize: 12, fontWeight: '800' },
   moverSymbol: { color: COLORS.muted, fontSize: 9, marginTop: 4 },
@@ -1342,7 +1424,7 @@ const styles = StyleSheet.create({
   moverNegative: { color: '#FF7B88' },
   moverDisclaimer: { color: COLORS.muted, fontSize: 10, lineHeight: 15, marginTop: 12 },
   loadMoreButton: { marginTop: 4, marginBottom: 14 },
-  authScreen: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 22, justifyContent: 'center' },
+  authScreen: { flex: 1, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0, backgroundColor: COLORS.background, paddingHorizontal: 22, justifyContent: 'center' },
   authBackButton: { position: 'absolute', top: 54, left: 18, zIndex: 10, padding: 6 },
   authHero: { alignItems: 'center', marginBottom: 30 },
   logo: { width: 76, height: 76, borderRadius: 22, backgroundColor: '#073C78', borderWidth: 1, borderColor: '#197FE4', alignItems: 'center', justifyContent: 'center', marginBottom: 15 },
