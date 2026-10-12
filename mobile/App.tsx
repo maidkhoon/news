@@ -45,7 +45,7 @@ type Article = {
   categories?: { name?: string; slug?: string } | null
 }
 type Tab = 'Home' | 'Crypto' | 'NSE' | 'BSE' | 'Cricket'
-type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth' | 'referrals'
+type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth' | 'referrals' | 'profile'
 type ReferralSummary = { code: string; link: string; rewardDays: number; successful: number; pending: number; referrals: Array<{ id: string; status: string; created_at: string; rewarded_at?: string | null }>; appliedReferral: { status: string; reward_days: number; rewarded_at?: string | null } | null }
 type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
@@ -53,7 +53,9 @@ type MarketStock = { symbol: string; name: string; exchange: 'NSE' | 'BSE'; pric
 type MarketMovers = { exchange: 'NSE' | 'BSE'; count: number; gainers: MarketStock[]; losers: MarketStock[]; fetchedAt: string; dataTimestamp: string | null; cached: boolean }
 type TickerItem = { kind: 'crypto' | 'stock'; symbol: string; name: string; price: number; percentChange: number | null; currency: string; exchange: 'NSE' | 'BSE' | null; dataTimestamp: string | null }
 type MarketTicker = { items: TickerItem[]; fetchedAt: string; refreshSeconds: number; cached: boolean }
-type IndexQuote = { key: 'SENSEX' | 'NIFTY50'; label: string; value: number | null; change: number | null; percentChange: number | null; dataTimestamp: string | null }
+type CryptoMover = { id: string; symbol: string; name: string; image: string | null; price: number; percentChange: number; marketCap: number | null; marketCapRank: number | null }
+type CryptoMovers = { count: number; currency: 'INR'; period: '24h'; gainers: CryptoMover[]; losers: CryptoMover[]; fetchedAt: string; provider: string; cached: boolean }
+type MemberProfile = { id: string; name: string | null; phone: string | null; email: string | null; role: string | null; status: boolean | null }
 
 const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
 const TOPICS_STORAGE_KEY = 'bazaarnexa:briefing-topics'
@@ -81,14 +83,6 @@ const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://news-api-egmd
 const NAV_TABS: Tab[] = ['Home', 'Crypto', 'NSE', 'BSE', 'Cricket']
 const NAV_ICONS = ['⌂', '₿', '↗', '▥', '🏏']
 const FILTERS = ['All', 'Indian Market', 'Crypto', 'Cricket']
-// BazaarNexa's market data provider (Indian API) exposes NSE/BSE top gainers & losers,
-// not index-level ticks. Until an index feed is added, both cards render an honest
-// "unavailable" state rather than a fabricated value — never invent numbers here.
-const INDIAN_INDICES: IndexQuote[] = [
-  { key: 'SENSEX', label: 'Sensex', value: null, change: null, percentChange: null, dataTimestamp: null },
-  { key: 'NIFTY50', label: 'Nifty 50', value: null, change: null, percentChange: null, dataTimestamp: null },
-]
-
 // Classifies Supabase auth errors so network, rate-limit, and WhatsApp provider
 // failures show distinct, actionable messages instead of a raw stack trace.
 function describeAuthError(error: unknown): string {
@@ -139,6 +133,15 @@ export default function App() {
   const [marketMovers, setMarketMovers] = useState<MarketMovers | null>(null)
   const [marketLoading, setMarketLoading] = useState(false)
   const [marketError, setMarketError] = useState('')
+  const [cryptoMovers, setCryptoMovers] = useState<CryptoMovers | null>(null)
+  const [cryptoLoading, setCryptoLoading] = useState(false)
+  const [cryptoError, setCryptoError] = useState('')
+  const [cryptoView, setCryptoView] = useState<'gainers' | 'losers'>('gainers')
+  const [profile, setProfile] = useState<MemberProfile | null>(null)
+  const [profileName, setProfileName] = useState('')
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileError, setProfileError] = useState('')
   const [marketView, setMarketView] = useState<'gainers' | 'losers'>('gainers')
   const [ticker, setTicker] = useState<MarketTicker | null>(null)
   const [tickerStale, setTickerStale] = useState(false)
@@ -346,6 +349,46 @@ export default function App() {
     Alert.alert('Sign in required', message, [{ text: 'Not now' }, { text: 'Sign in', onPress: openSignIn }])
   }, [openSignIn])
 
+  const loadProfile = useCallback(async () => {
+    if (!session?.access_token) { openSignIn(); return }
+    setProfileLoading(true)
+    setProfileError('')
+    try {
+      const response = await fetch(API_BASE + '/api/users/me', { headers: { Authorization: `Bearer ${session.access_token}` } })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error || 'Unable to load your profile.')
+      setProfile(json.data as MemberProfile)
+      setProfileName(json.data?.name || '')
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'Unable to load your profile.')
+    } finally { setProfileLoading(false) }
+  }, [session?.access_token, openSignIn])
+
+  const saveProfile = async () => {
+    if (!session?.access_token) { openSignIn(); return }
+    const name = profileName.trim()
+    if (name.length < 2 || name.length > 80) {
+      setProfileError('Name must be between 2 and 80 characters.')
+      return
+    }
+    setProfileSaving(true)
+    setProfileError('')
+    try {
+      const response = await fetch(API_BASE + '/api/users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ name })
+      })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error || 'Unable to save your profile.')
+      setProfile(json.data as MemberProfile)
+      setProfileName(json.data.name || '')
+      Alert.alert('Profile updated', 'Your name has been saved.')
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'Unable to save your profile.')
+    } finally { setProfileSaving(false) }
+  }
+
   const loadFeed = useCallback(async (opts: { isRefresh?: boolean; nextPage?: number } = {}) => {
     const { isRefresh = false, nextPage = 1 } = opts
     if (isRefresh) setRefreshing(true)
@@ -393,6 +436,24 @@ export default function App() {
   useEffect(() => {
     if (tab === 'NSE' || tab === 'BSE') void loadMarketMovers(tab)
   }, [tab, loadMarketMovers])
+
+  const loadCryptoMovers = useCallback(async () => {
+    setCryptoLoading(true)
+    setCryptoError('')
+    try {
+      const response = await fetch(API_BASE + '/api/market/crypto-movers?count=20')
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.message || json.error || 'Crypto market data is temporarily unavailable.')
+      setCryptoMovers(json as CryptoMovers)
+    } catch (error) {
+      setCryptoError(error instanceof Error ? error.message : 'Unable to load crypto movers.')
+      setCryptoMovers(null)
+    } finally { setCryptoLoading(false) }
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'Crypto') void loadCryptoMovers()
+  }, [tab, loadCryptoMovers])
 
   const loadTicker = useCallback(async () => {
     try {
@@ -468,7 +529,12 @@ export default function App() {
   const loadMemberData = useCallback(async (accessToken: string) => {
     const headers = { Authorization: `Bearer ${accessToken}` }
     try {
-      await fetch(`${API_BASE}/api/users/me`, { headers })
+      const profileResponse = await fetch(`${API_BASE}/api/users/me`, { headers })
+      if (profileResponse.ok) {
+        const profileJson = await profileResponse.json()
+        setProfile(profileJson.data as MemberProfile)
+        setProfileName(profileJson.data?.name || '')
+      }
       const response = await fetch(`${API_BASE}/api/subscriptions/me`, { headers })
       if (response.ok) {
         const json = await response.json()
@@ -847,6 +913,58 @@ export default function App() {
     )
   }
 
+  if (screen === 'profile') {
+    const displayName = profile?.name || profileName || session?.user.user_metadata?.full_name || session?.user.email?.split('@')[0] || 'BazaarNexa member'
+    const joined = session?.user.created_at ? new Date(session.user.created_at).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : '—'
+    return (
+      <SafeAreaView style={styles.screen}>
+        <StatusBar barStyle="light-content" backgroundColor={COLORS.background} translucent={false} />
+        <View style={styles.detailHeader}>
+          <Pressable onPress={() => setScreen('home')} style={styles.backButton} hitSlop={12}><Text style={styles.backText}>‹  Back</Text></Pressable>
+          <Text style={styles.detailBrand}>My Profile</Text>
+          <View style={{ width: 48 }} />
+        </View>
+        <ScrollView contentContainerStyle={styles.profileContent} keyboardShouldPersistTaps="handled">
+          <View style={styles.profileHero}>
+            <View style={styles.profileAvatar}><Text style={styles.profileAvatarText}>{displayName.charAt(0).toUpperCase()}</Text></View>
+            <Text style={styles.profileName}>{displayName}</Text>
+            <Text style={styles.profileSubtitle}>BazaarNexa member</Text>
+            <View style={styles.profileMemberBadge}><Text style={styles.profileMemberBadgeText}>{activeSubscription ? '✦ PREMIUM MEMBER' : '✓ ACCOUNT ACTIVE'}</Text></View>
+          </View>
+          <View style={styles.profileSection}>
+            <Text style={styles.profileSectionTitle}>Personal information</Text>
+            <Text style={styles.profileFieldLabel}>Full name</Text>
+            <TextInput value={profileName} onChangeText={setProfileName} placeholder="Enter your full name" placeholderTextColor={COLORS.muted} style={styles.profileInput} maxLength={80} autoCapitalize="words" editable={!profileSaving} />
+            <Text style={styles.profileHelp}>Use the name you want shown on your BazaarNexa account.</Text>
+            <Text style={styles.profileFieldLabel}>Email address</Text>
+            <View style={styles.profileReadOnly}><Text style={styles.profileReadOnlyText}>{profile?.email || session?.user.email || 'Not provided'}</Text><Text style={styles.profileReadOnlyBadge}>SIGN-IN ACCOUNT</Text></View>
+            <Text style={styles.profileFieldLabel}>Mobile number</Text>
+            <View style={styles.profileReadOnly}><Text style={styles.profileReadOnlyText}>{profile?.phone || session?.user.phone || 'Not linked'}</Text><Text style={styles.profileReadOnlyBadge}>SIGN-IN ACCOUNT</Text></View>
+            {profileError ? <Text style={styles.profileError}>{profileError}</Text> : null}
+            <Pressable onPress={saveProfile} disabled={profileSaving || profileLoading} style={[styles.primaryButton, (profileSaving || profileLoading) && styles.disabled]}>
+              {profileSaving ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Save changes  →</Text>}
+            </Pressable>
+            {profileLoading ? <ActivityIndicator color={COLORS.blue} style={{ marginTop: 12 }} /> : null}
+          </View>
+          <View style={styles.profileSection}>
+            <Text style={styles.profileSectionTitle}>Your BazaarNexa</Text>
+            <Pressable onPress={() => setScreen('plans')} style={styles.profileAction}><View style={styles.profileActionIcon}><Text style={styles.profileActionGlyph}>✦</Text></View><View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Subscription & plans</Text><Text style={styles.profileActionSubtitle}>{activeSubscription ? activeSubscription.plan_type + ' · expires ' + formatExpiry(activeSubscription.expiry_date) : 'Explore Basic and Pro membership'}</Text></View><Text style={styles.profileActionArrow}>›</Text></Pressable>
+            <Pressable onPress={() => setScreen('saved')} style={styles.profileAction}><View style={styles.profileActionIcon}><Text style={styles.profileActionGlyph}>▣</Text></View><View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Saved articles</Text><Text style={styles.profileActionSubtitle}>{savedIds.length} saved for later</Text></View><Text style={styles.profileActionArrow}>›</Text></Pressable>
+            <Pressable onPress={() => { void loadReferralSummary() }} style={styles.profileAction}><View style={styles.profileActionIcon}><Text style={styles.profileActionGlyph}>↗</Text></View><View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Referral rewards</Text><Text style={styles.profileActionSubtitle}>Invite friends and view rewards</Text></View><Text style={styles.profileActionArrow}>›</Text></Pressable>
+            <Pressable onPress={() => { setScreen('notifications'); void loadNotifications() }} style={styles.profileAction}><View style={styles.profileActionIcon}><Text style={styles.profileActionGlyph}>♧</Text></View><View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Notifications</Text><Text style={styles.profileActionSubtitle}>Market alerts and research updates</Text></View><Text style={styles.profileActionArrow}>›</Text></Pressable>
+          </View>
+          <View style={styles.profileSection}>
+            <Text style={styles.profileSectionTitle}>Account</Text>
+            <View style={styles.profileMetaRow}><Text style={styles.profileMetaLabel}>Member since</Text><Text style={styles.profileMetaValue}>{joined}</Text></View>
+            <View style={styles.profileMetaRow}><Text style={styles.profileMetaLabel}>Account ID</Text><Text style={styles.profileMetaValue}>{session?.user.id ? session.user.id.slice(0, 8).toUpperCase() : '—'}</Text></View>
+            <Pressable onPress={() => Alert.alert('Sign out', 'Sign out of BazaarNexa on this device?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Sign out', style: 'destructive', onPress: () => { void signOut() } }])} style={styles.signOutButton}><Text style={styles.signOutText}>Sign out</Text></Pressable>
+          </View>
+          <Text style={styles.disclaimer}>Your account details are handled securely. Contact support if you need help with your account.</Text>
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+
   if (screen === 'referrals') {
     return (
       <SafeAreaView style={styles.screen}>
@@ -1106,7 +1224,7 @@ export default function App() {
         <Pressable onPress={() => { setSearchOpen(open => !open); setSearch('') }} style={styles.headerIcon} accessibilityRole="button" accessibilityLabel="Search"><Text style={styles.headerIconText}>⌕</Text></Pressable>
         <Pressable onPress={() => { setScreen('notifications'); if (session) void loadNotifications() }} style={styles.headerIcon} accessibilityRole="button" accessibilityLabel="Notifications"><Text style={styles.headerIconText}>♧</Text></Pressable>
         {session ? (
-          <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || session.user.email || 'member'), [{ text: 'Close' }, { text: 'Referral program', onPress: () => { void loadReferralSummary() } }, { text: 'Saved articles', onPress: () => setScreen('saved') }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar} accessibilityRole="button" accessibilityLabel="Account menu"><Text style={styles.avatarText}>●</Text></Pressable>
+          <Pressable onPress={() => { setScreen('profile'); void loadProfile() }} style={styles.avatar} accessibilityRole="button" accessibilityLabel="Profile dashboard"><Text style={styles.avatarText}>{(profileName || session.user.email || session.user.phone || 'U').trim().charAt(0).toUpperCase()}</Text></Pressable>
         ) : (
           <Pressable onPress={openSignIn} style={styles.signInPill} accessibilityRole="button" accessibilityLabel="Sign in"><Text style={styles.signInPillText}>Sign in</Text></Pressable>
         )}
@@ -1134,6 +1252,33 @@ export default function App() {
         )}
         ListHeaderComponent={
           <>
+            {tab === 'Crypto' ? (
+              <View style={styles.moversPanel}>
+                <View style={styles.sectionHeading}>
+                  <View><Text style={styles.eyebrow}>CRYPTOCURRENCY MARKET</Text><Text style={styles.sectionTitle}>Top Crypto Movers</Text></View>
+                  <Pressable onPress={() => void loadCryptoMovers()} style={styles.retryButton} accessibilityRole="button" accessibilityLabel="Refresh crypto movers"><Text style={styles.retryText}>Refresh</Text></Pressable>
+                </View>
+                <Text style={styles.moverMeta}>Top 20 by 24-hour change among the 100 largest coins · INR</Text>
+                {cryptoMovers?.fetchedAt ? <Text style={styles.moverMeta}>Fetched {new Date(cryptoMovers.fetchedAt).toLocaleString('en-IN')} · {cryptoMovers.provider}{cryptoMovers.cached ? ' · cached' : ''}</Text> : null}
+                <View style={styles.moverTabs}>
+                  <Pressable onPress={() => setCryptoView('gainers')} style={[styles.moverTab, cryptoView === 'gainers' && styles.moverTabActive]}><Text style={[styles.moverTabText, cryptoView === 'gainers' && styles.moverTabTextActive]}>Top Gainers</Text></Pressable>
+                  <Pressable onPress={() => setCryptoView('losers')} style={[styles.moverTab, cryptoView === 'losers' && styles.moverTabActive]}><Text style={[styles.moverTabText, cryptoView === 'losers' && styles.moverTabTextActive]}>Top Losers</Text></Pressable>
+                </View>
+                {cryptoLoading ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading crypto market movers…</Text></View> : null}
+                {cryptoError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Crypto data unavailable</Text><Text style={styles.muted}>{cryptoError}</Text><Text style={styles.muted}>No sample prices are shown. Please retry shortly.</Text></View> : null}
+                {!cryptoLoading && !cryptoError && cryptoMovers ? (
+                  (cryptoView === 'gainers' ? cryptoMovers.gainers : cryptoMovers.losers).length ? (cryptoView === 'gainers' ? cryptoMovers.gainers : cryptoMovers.losers).map((coin, index) => (
+                    <View key={coin.id} style={styles.moverRow}>
+                      <View style={styles.moverRank}><Text style={styles.moverRankText}>{index + 1}</Text></View>
+                      {coin.image ? <Image source={{ uri: coin.image }} style={styles.cryptoCoinImage} /> : null}
+                      <View style={styles.moverCopy}><Text style={styles.moverName} numberOfLines={1}>{coin.name}</Text><Text style={styles.moverSymbol}>{coin.symbol}{coin.marketCapRank ? ' · Rank #' + coin.marketCapRank : ''}</Text></View>
+                      <View style={styles.moverValues}><Text style={styles.moverPrice}>₹{coin.price.toLocaleString('en-IN', { maximumFractionDigits: coin.price < 100 ? 4 : 2 })}</Text><Text style={[styles.moverChange, coin.percentChange >= 0 ? styles.moverPositive : styles.moverNegative]}>{coin.percentChange >= 0 ? '+' : ''}{coin.percentChange.toFixed(2)}%</Text></View>
+                    </View>
+                  )) : <View style={styles.stateCard}><Text style={styles.stateTitle}>No crypto {cryptoView} data returned</Text><Text style={styles.muted}>Try refreshing in a moment.</Text></View>
+                ) : null}
+                <Text style={styles.moverDisclaimer}>24-hour market movement from CoinGecko. Data may be delayed. For research only—not investment advice.</Text>
+              </View>
+            ) : null}
             {(tab === 'NSE' || tab === 'BSE') ? (
               <View style={styles.moversPanel}>
                 <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>INDIAN EQUITY MARKETS</Text><Text style={styles.sectionTitle}>{tab} Top Movers</Text></View><Pressable onPress={() => void loadMarketMovers(tab)} style={styles.retryButton} accessibilityRole="button" accessibilityLabel={`Refresh ${tab} movers`}><Text style={styles.retryText}>Refresh</Text></Pressable></View>
@@ -1155,21 +1300,6 @@ export default function App() {
                 <Text style={styles.moverDisclaimer}>Market data may be delayed by the provider. For research only—not investment advice.</Text>
               </View>
             ) : null}
-            <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>INDIAN INDICES</Text><Text style={styles.sectionTitle}>Indian Market</Text></View></View>
-            <View style={styles.indexPanel}>
-              {INDIAN_INDICES.map(index => (
-                <View key={index.key} style={styles.indexRow}>
-                  <Text style={styles.indexName}>{index.label}</Text>
-                  {index.value !== null ? (
-                    <View style={styles.indexValues}>
-                      <Text style={styles.indexValue}>{index.value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Text>
-                      {index.percentChange !== null ? <Text style={[styles.moverChange, index.percentChange >= 0 ? styles.moverPositive : styles.moverNegative]}>{index.percentChange >= 0 ? '+' : ''}{index.percentChange.toFixed(2)}%</Text> : null}
-                    </View>
-                  ) : <Text style={styles.indexUnavailable}>Index data unavailable</Text>}
-                </View>
-              ))}
-            </View>
-            <Text style={styles.moverDisclaimer}>BazaarNexa's market data provider currently publishes NSE/BSE top movers, not live index levels — see the NSE and BSE tabs for real-time stock data.</Text>
             <View style={styles.marketStrip}>
               <View style={styles.marketTile}><Text style={styles.marketEmoji}>₿</Text><View><Text style={styles.marketName}>CRYPTO</Text><Text style={styles.marketValue}>Digital assets</Text></View><Text style={styles.marketArrow}>↗</Text></View>
             </View>
@@ -1237,8 +1367,8 @@ const COLORS = {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: COLORS.background },
-  loadingScreen: { flex: 1, backgroundColor: COLORS.background, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  screen: { flex: 1, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0, backgroundColor: COLORS.background },
+  loadingScreen: { flex: 1, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0, backgroundColor: COLORS.background, alignItems: 'center', justifyContent: 'center', gap: 12 },
   muted: { color: COLORS.muted, fontSize: 13, lineHeight: 20 },
   configErrorText: { textAlign: 'center', paddingHorizontal: 24 },
   otpActionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -1254,6 +1384,36 @@ const styles = StyleSheet.create({
   moverRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   moverRank: { width: 25, height: 25, borderRadius: 8, backgroundColor: COLORS.surfaceLight, alignItems: 'center', justifyContent: 'center' },
   moverRankText: { color: COLORS.muted, fontSize: 10, fontWeight: '800' },
+  cryptoCoinImage: { width: 26, height: 26, borderRadius: 13 },
+  profileContent: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 34, gap: 16 },
+  profileHero: { alignItems: 'center', backgroundColor: '#0C2742', borderColor: COLORS.border, borderWidth: 1, borderRadius: 22, paddingVertical: 26, paddingHorizontal: 18 },
+  profileAvatar: { width: 76, height: 76, borderRadius: 38, backgroundColor: '#0B63C7', borderWidth: 3, borderColor: '#3BA5FF', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  profileAvatarText: { color: '#FFFFFF', fontSize: 32, fontWeight: '900' },
+  profileName: { color: COLORS.text, fontSize: 22, fontWeight: '900', textAlign: 'center' },
+  profileSubtitle: { color: COLORS.muted, fontSize: 13, marginTop: 5 },
+  profileMemberBadge: { marginTop: 14, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: '#123D37', borderWidth: 1, borderColor: '#246F5E' },
+  profileMemberBadgeText: { color: '#5BE0B0', fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  profileSection: { backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1, borderRadius: 18, padding: 17, gap: 10 },
+  profileSectionTitle: { color: COLORS.text, fontSize: 16, fontWeight: '900', marginBottom: 4 },
+  profileFieldLabel: { color: '#B5C7DC', fontSize: 12, fontWeight: '800', marginTop: 5 },
+  profileInput: { minHeight: 50, backgroundColor: '#07182B', borderWidth: 1, borderColor: '#45617F', borderRadius: 12, paddingHorizontal: 13, color: COLORS.text, fontSize: 15 },
+  profileHelp: { color: COLORS.muted, fontSize: 11, lineHeight: 16 },
+  profileReadOnly: { backgroundColor: '#07182B', borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, padding: 12, gap: 5 },
+  profileReadOnlyText: { color: COLORS.text, fontSize: 14 },
+  profileReadOnlyBadge: { color: COLORS.muted, fontSize: 8, letterSpacing: 1, fontWeight: '800' },
+  profileError: { color: '#FF8994', fontSize: 12, lineHeight: 18 },
+  profileAction: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  profileActionIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#123B60', alignItems: 'center', justifyContent: 'center' },
+  profileActionGlyph: { color: COLORS.blueLight, fontSize: 20, fontWeight: '900' },
+  profileActionCopy: { flex: 1, gap: 4 },
+  profileActionTitle: { color: COLORS.text, fontSize: 13, fontWeight: '800' },
+  profileActionSubtitle: { color: COLORS.muted, fontSize: 11, lineHeight: 15 },
+  profileActionArrow: { color: COLORS.muted, fontSize: 25 },
+  profileMetaRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  profileMetaLabel: { color: COLORS.muted, fontSize: 12 },
+  profileMetaValue: { color: COLORS.text, fontSize: 12, fontWeight: '700' },
+  signOutButton: { borderColor: '#803B4A', borderWidth: 1, borderRadius: 12, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  signOutText: { color: '#FF8994', fontSize: 14, fontWeight: '800' },
   moverCopy: { flex: 1 },
   moverName: { color: COLORS.text, fontSize: 12, fontWeight: '800' },
   moverSymbol: { color: COLORS.muted, fontSize: 9, marginTop: 4 },
@@ -1264,7 +1424,7 @@ const styles = StyleSheet.create({
   moverNegative: { color: '#FF7B88' },
   moverDisclaimer: { color: COLORS.muted, fontSize: 10, lineHeight: 15, marginTop: 12 },
   loadMoreButton: { marginTop: 4, marginBottom: 14 },
-  authScreen: { flex: 1, backgroundColor: COLORS.background, paddingHorizontal: 22, justifyContent: 'center' },
+  authScreen: { flex: 1, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0, backgroundColor: COLORS.background, paddingHorizontal: 22, justifyContent: 'center' },
   authBackButton: { position: 'absolute', top: 54, left: 18, zIndex: 10, padding: 6 },
   authHero: { alignItems: 'center', marginBottom: 30 },
   logo: { width: 76, height: 76, borderRadius: 22, backgroundColor: '#073C78', borderWidth: 1, borderColor: '#197FE4', alignItems: 'center', justifyContent: 'center', marginBottom: 15 },
