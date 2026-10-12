@@ -166,6 +166,7 @@ export default function App() {
   const [activeSubscription, setActiveSubscription] = useState<Subscription | null>(null)
   const [planCycle, setPlanCycle] = useState<'monthly' | 'yearly'>('monthly')
   const [chosenPlan, setChosenPlan] = useState<'BASIC' | 'PRO'>('BASIC')
+  const [billingAction, setBillingAction] = useState<'purchase' | 'restore' | null>(null)
   const finishTransactionRef = useRef<((args: any) => Promise<any>) | null>(null)
 
   useEffect(() => {
@@ -600,9 +601,11 @@ export default function App() {
       const productId = purchase.productId || purchase.id
       const purchaseToken = purchase.purchaseToken
       if (!session?.access_token || typeof productId !== 'string' || typeof purchaseToken !== 'string') {
+        setBillingAction(null)
         Alert.alert('Purchase pending', 'We could not read the purchase details. Please use Restore Purchases or contact support before trying again.')
         return
       }
+      setBillingAction('purchase')
       try {
         const response = await fetch(`${API_BASE}/api/subscriptions/verify-google-play`, {
           method: 'POST',
@@ -611,19 +614,31 @@ export default function App() {
         })
         const json = await response.json()
         if (!response.ok) throw new Error(json.message || json.error || 'Google Play could not verify this purchase.')
-        await finishTransactionRef.current?.({ purchase, isConsumable: false })
+        // The server verifies and acknowledges Google Play purchases before returning success.
+        // A client-side transaction-finalization hiccup must not misreport a verified purchase.
+        try {
+          await finishTransactionRef.current?.({ purchase, isConsumable: false })
+        } catch (finishError) {
+          console.warn('Client transaction finalization failed after server verification:', finishError instanceof Error ? finishError.message : finishError)
+        }
         setActiveSubscription(json.data || null)
         setScreen('purchase-success')
         void loadMemberData(session.access_token)
       } catch (error) {
         Alert.alert('Purchase verification failed', error instanceof Error ? error.message : 'Please contact support. Do not purchase again until this transaction is resolved.')
+      } finally {
+        setBillingAction(null)
       }
     },
     onPurchaseError: (error: any) => {
+      setBillingAction(null)
       if (error?.code === 'UserCancelled' || error?.code === 'user-cancelled') return
       Alert.alert('Google Play purchase failed', error?.message || 'Please try again later.')
     },
-    onError: (error: Error) => console.warn('Billing error:', error.message),
+    onError: (error: Error) => {
+      setBillingAction(null)
+      console.warn('Billing error:', error.message)
+    },
   })
   const { connected: billingConnected, subscriptions: billingProducts, fetchProducts, requestPurchase, finishTransaction } = iap
 
@@ -638,6 +653,7 @@ export default function App() {
   }, [billingConnected, fetchProducts])
 
   const buySelectedPlan = async () => {
+    if (billingAction) return
     if (!session?.access_token) {
       promptSignIn('Sign in to purchase a BazaarNexa subscription.')
       return
@@ -666,6 +682,7 @@ export default function App() {
       return
     }
     try {
+      setBillingAction('purchase')
       await requestPurchase({
         request: {
           apple: { sku: productId },
@@ -677,16 +694,19 @@ export default function App() {
         type: 'subs',
       })
     } catch (error) {
+      setBillingAction(null)
       Alert.alert('Unable to start checkout', error instanceof Error ? error.message : 'Please try again later.')
     }
   }
 
   const restorePurchases = async () => {
+    if (billingAction) return
     if (!session?.access_token) {
       promptSignIn('Sign in to restore your BazaarNexa subscription.')
       return
     }
     try {
+      setBillingAction('restore')
       const purchases = await getAvailablePurchases()
       if (!purchases.length) {
         Alert.alert('No purchases found', 'Google Play did not return any restorable subscriptions for this account.')
@@ -718,6 +738,8 @@ export default function App() {
       }
     } catch (error) {
       Alert.alert('Restore failed', error instanceof Error ? error.message : 'Please try again later.')
+    } finally {
+      setBillingAction(null)
     }
   }
 
@@ -1153,8 +1175,12 @@ export default function App() {
                     <Text style={styles.activePlanTitle}>Google Play product available</Text>
                     <Text style={styles.muted}>{chosenProduct?.title || chosenProductId} · {chosenProduct?.displayPrice || (chosenPlan === 'BASIC' ? basicPrice : proPrice)}</Text>
                   </View>
-                  <Pressable onPress={buySelectedPlan} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Continue with Google Play  →</Text></Pressable>
-                  <Pressable onPress={restorePurchases} style={styles.textButton}><Text style={styles.linkText}>Restore purchases</Text></Pressable>
+                  <Pressable onPress={buySelectedPlan} disabled={billingAction !== null} style={[styles.primaryButton, billingAction !== null && styles.disabled]}>
+                    {billingAction === 'purchase' ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Continue with Google Play  →</Text>}
+                  </Pressable>
+                  <Pressable onPress={restorePurchases} disabled={billingAction !== null} style={[styles.textButton, billingAction !== null && styles.disabled]}>
+                    {billingAction === 'restore' ? <ActivityIndicator color={COLORS.blueLight} /> : <Text style={styles.linkText}>Restore purchases</Text>}
+                  </Pressable>
                   <Text style={styles.disclaimer}>Your purchase will be verified by the BazaarNexa server before premium access is activated.</Text>
                 </>
               ) : (
