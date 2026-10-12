@@ -45,7 +45,7 @@ type Article = {
   categories?: { name?: string; slug?: string } | null
 }
 type Tab = 'Home' | 'Crypto' | 'NSE' | 'BSE' | 'Cricket'
-type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth' | 'referrals'
+type AppScreen = 'home' | 'plans' | 'payment' | 'notifications' | 'saved' | 'auth' | 'referrals' | 'profile'
 type ReferralSummary = { code: string; link: string; rewardDays: number; successful: number; pending: number; referrals: Array<{ id: string; status: string; created_at: string; rewarded_at?: string | null }>; appliedReferral: { status: string; reward_days: number; rewarded_at?: string | null } | null }
 type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
@@ -53,7 +53,9 @@ type MarketStock = { symbol: string; name: string; exchange: 'NSE' | 'BSE'; pric
 type MarketMovers = { exchange: 'NSE' | 'BSE'; count: number; gainers: MarketStock[]; losers: MarketStock[]; fetchedAt: string; dataTimestamp: string | null; cached: boolean }
 type TickerItem = { kind: 'crypto' | 'stock'; symbol: string; name: string; price: number; percentChange: number | null; currency: string; exchange: 'NSE' | 'BSE' | null; dataTimestamp: string | null }
 type MarketTicker = { items: TickerItem[]; fetchedAt: string; refreshSeconds: number; cached: boolean }
-type IndexQuote = { key: 'SENSEX' | 'NIFTY50'; label: string; value: number | null; change: number | null; percentChange: number | null; dataTimestamp: string | null }
+type CryptoMover = { id: string; symbol: string; name: string; image: string | null; price: number; percentChange: number; marketCap: number | null; marketCapRank: number | null }
+type CryptoMovers = { count: number; currency: 'INR'; period: '24h'; gainers: CryptoMover[]; losers: CryptoMover[]; fetchedAt: string; provider: string; cached: boolean }
+type MemberProfile = { id: string; name: string | null; phone: string | null; email: string | null; role: string | null; status: boolean | null }
 
 const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
 const TOPICS_STORAGE_KEY = 'bazaarnexa:briefing-topics'
@@ -81,14 +83,6 @@ const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || 'https://news-api-egmd
 const NAV_TABS: Tab[] = ['Home', 'Crypto', 'NSE', 'BSE', 'Cricket']
 const NAV_ICONS = ['⌂', '₿', '↗', '▥', '🏏']
 const FILTERS = ['All', 'Indian Market', 'Crypto', 'Cricket']
-// BazaarNexa's market data provider (Indian API) exposes NSE/BSE top gainers & losers,
-// not index-level ticks. Until an index feed is added, both cards render an honest
-// "unavailable" state rather than a fabricated value — never invent numbers here.
-const INDIAN_INDICES: IndexQuote[] = [
-  { key: 'SENSEX', label: 'Sensex', value: null, change: null, percentChange: null, dataTimestamp: null },
-  { key: 'NIFTY50', label: 'Nifty 50', value: null, change: null, percentChange: null, dataTimestamp: null },
-]
-
 // Classifies Supabase auth errors so network, rate-limit, and WhatsApp provider
 // failures show distinct, actionable messages instead of a raw stack trace.
 function describeAuthError(error: unknown): string {
@@ -139,6 +133,15 @@ export default function App() {
   const [marketMovers, setMarketMovers] = useState<MarketMovers | null>(null)
   const [marketLoading, setMarketLoading] = useState(false)
   const [marketError, setMarketError] = useState('')
+  const [cryptoMovers, setCryptoMovers] = useState<CryptoMovers | null>(null)
+  const [cryptoLoading, setCryptoLoading] = useState(false)
+  const [cryptoError, setCryptoError] = useState('')
+  const [cryptoView, setCryptoView] = useState<'gainers' | 'losers'>('gainers')
+  const [profile, setProfile] = useState<MemberProfile | null>(null)
+  const [profileName, setProfileName] = useState('')
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileError, setProfileError] = useState('')
   const [marketView, setMarketView] = useState<'gainers' | 'losers'>('gainers')
   const [ticker, setTicker] = useState<MarketTicker | null>(null)
   const [tickerStale, setTickerStale] = useState(false)
@@ -346,6 +349,46 @@ export default function App() {
     Alert.alert('Sign in required', message, [{ text: 'Not now' }, { text: 'Sign in', onPress: openSignIn }])
   }, [openSignIn])
 
+  const loadProfile = useCallback(async () => {
+    if (!session?.access_token) { openSignIn(); return }
+    setProfileLoading(true)
+    setProfileError('')
+    try {
+      const response = await fetch(API_BASE + '/api/users/me', { headers: { Authorization: `Bearer ${session.access_token}` } })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error || 'Unable to load your profile.')
+      setProfile(json.data as MemberProfile)
+      setProfileName(json.data?.name || '')
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'Unable to load your profile.')
+    } finally { setProfileLoading(false) }
+  }, [session?.access_token, openSignIn])
+
+  const saveProfile = async () => {
+    if (!session?.access_token) { openSignIn(); return }
+    const name = profileName.trim()
+    if (name.length < 2 || name.length > 80) {
+      setProfileError('Name must be between 2 and 80 characters.')
+      return
+    }
+    setProfileSaving(true)
+    setProfileError('')
+    try {
+      const response = await fetch(API_BASE + '/api/users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ name })
+      })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error || 'Unable to save your profile.')
+      setProfile(json.data as MemberProfile)
+      setProfileName(json.data.name || '')
+      Alert.alert('Profile updated', 'Your name has been saved.')
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'Unable to save your profile.')
+    } finally { setProfileSaving(false) }
+  }
+
   const loadFeed = useCallback(async (opts: { isRefresh?: boolean; nextPage?: number } = {}) => {
     const { isRefresh = false, nextPage = 1 } = opts
     if (isRefresh) setRefreshing(true)
@@ -393,6 +436,24 @@ export default function App() {
   useEffect(() => {
     if (tab === 'NSE' || tab === 'BSE') void loadMarketMovers(tab)
   }, [tab, loadMarketMovers])
+
+  const loadCryptoMovers = useCallback(async () => {
+    setCryptoLoading(true)
+    setCryptoError('')
+    try {
+      const response = await fetch(API_BASE + '/api/market/crypto-movers?count=20')
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.message || json.error || 'Crypto market data is temporarily unavailable.')
+      setCryptoMovers(json as CryptoMovers)
+    } catch (error) {
+      setCryptoError(error instanceof Error ? error.message : 'Unable to load crypto movers.')
+      setCryptoMovers(null)
+    } finally { setCryptoLoading(false) }
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'Crypto') void loadCryptoMovers()
+  }, [tab, loadCryptoMovers])
 
   const loadTicker = useCallback(async () => {
     try {
@@ -468,7 +529,12 @@ export default function App() {
   const loadMemberData = useCallback(async (accessToken: string) => {
     const headers = { Authorization: `Bearer ${accessToken}` }
     try {
-      await fetch(`${API_BASE}/api/users/me`, { headers })
+      const profileResponse = await fetch(`${API_BASE}/api/users/me`, { headers })
+      if (profileResponse.ok) {
+        const profileJson = await profileResponse.json()
+        setProfile(profileJson.data as MemberProfile)
+        setProfileName(profileJson.data?.name || '')
+      }
       const response = await fetch(`${API_BASE}/api/subscriptions/me`, { headers })
       if (response.ok) {
         const json = await response.json()
@@ -1106,7 +1172,7 @@ export default function App() {
         <Pressable onPress={() => { setSearchOpen(open => !open); setSearch('') }} style={styles.headerIcon} accessibilityRole="button" accessibilityLabel="Search"><Text style={styles.headerIconText}>⌕</Text></Pressable>
         <Pressable onPress={() => { setScreen('notifications'); if (session) void loadNotifications() }} style={styles.headerIcon} accessibilityRole="button" accessibilityLabel="Notifications"><Text style={styles.headerIconText}>♧</Text></Pressable>
         {session ? (
-          <Pressable onPress={() => Alert.alert('Account', 'Signed in as ' + (session.user.phone || session.user.email || 'member'), [{ text: 'Close' }, { text: 'Referral program', onPress: () => { void loadReferralSummary() } }, { text: 'Saved articles', onPress: () => setScreen('saved') }, { text: 'Sign out', style: 'destructive', onPress: signOut }])} style={styles.avatar} accessibilityRole="button" accessibilityLabel="Account menu"><Text style={styles.avatarText}>●</Text></Pressable>
+          <Pressable onPress={() => { setScreen('profile'); void loadProfile() }} style={styles.avatar} accessibilityRole="button" accessibilityLabel="Profile dashboard"><Text style={styles.avatarText}>{(profileName || session.user.email || session.user.phone || 'U').trim().charAt(0).toUpperCase()}</Text></Pressable>
         ) : (
           <Pressable onPress={openSignIn} style={styles.signInPill} accessibilityRole="button" accessibilityLabel="Sign in"><Text style={styles.signInPillText}>Sign in</Text></Pressable>
         )}
@@ -1134,6 +1200,33 @@ export default function App() {
         )}
         ListHeaderComponent={
           <>
+            {tab === 'Crypto' ? (
+              <View style={styles.moversPanel}>
+                <View style={styles.sectionHeading}>
+                  <View><Text style={styles.eyebrow}>CRYPTOCURRENCY MARKET</Text><Text style={styles.sectionTitle}>Top Crypto Movers</Text></View>
+                  <Pressable onPress={() => void loadCryptoMovers()} style={styles.retryButton} accessibilityRole="button" accessibilityLabel="Refresh crypto movers"><Text style={styles.retryText}>Refresh</Text></Pressable>
+                </View>
+                <Text style={styles.moverMeta}>Top 20 by 24-hour price change · INR · Provider snapshot</Text>
+                {cryptoMovers?.fetchedAt ? <Text style={styles.moverMeta}>Fetched {new Date(cryptoMovers.fetchedAt).toLocaleString('en-IN')} · {cryptoMovers.provider}{cryptoMovers.cached ? ' · cached' : ''}</Text> : null}
+                <View style={styles.moverTabs}>
+                  <Pressable onPress={() => setCryptoView('gainers')} style={[styles.moverTab, cryptoView === 'gainers' && styles.moverTabActive]}><Text style={[styles.moverTabText, cryptoView === 'gainers' && styles.moverTabTextActive]}>Top Gainers</Text></Pressable>
+                  <Pressable onPress={() => setCryptoView('losers')} style={[styles.moverTab, cryptoView === 'losers' && styles.moverTabActive]}><Text style={[styles.moverTabText, cryptoView === 'losers' && styles.moverTabTextActive]}>Top Losers</Text></Pressable>
+                </View>
+                {cryptoLoading ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading crypto market movers…</Text></View> : null}
+                {cryptoError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Crypto data unavailable</Text><Text style={styles.muted}>{cryptoError}</Text><Text style={styles.muted}>No sample prices are shown. Please retry shortly.</Text></View> : null}
+                {!cryptoLoading && !cryptoError && cryptoMovers ? (
+                  (cryptoView === 'gainers' ? cryptoMovers.gainers : cryptoMovers.losers).length ? (cryptoView === 'gainers' ? cryptoMovers.gainers : cryptoMovers.losers).map((coin, index) => (
+                    <View key={coin.id} style={styles.moverRow}>
+                      <View style={styles.moverRank}><Text style={styles.moverRankText}>{index + 1}</Text></View>
+                      {coin.image ? <Image source={{ uri: coin.image }} style={styles.cryptoCoinImage} /> : null}
+                      <View style={styles.moverCopy}><Text style={styles.moverName} numberOfLines={1}>{coin.name}</Text><Text style={styles.moverSymbol}>{coin.symbol}{coin.marketCapRank ? ' · Rank #' + coin.marketCapRank : ''}</Text></View>
+                      <View style={styles.moverValues}><Text style={styles.moverPrice}>₹{coin.price.toLocaleString('en-IN', { maximumFractionDigits: coin.price < 100 ? 4 : 2 })}</Text><Text style={[styles.moverChange, coin.percentChange >= 0 ? styles.moverPositive : styles.moverNegative]}>{coin.percentChange >= 0 ? '+' : ''}{coin.percentChange.toFixed(2)}%</Text></View>
+                    </View>
+                  )) : <View style={styles.stateCard}><Text style={styles.stateTitle}>No crypto {cryptoView} data returned</Text><Text style={styles.muted}>Try refreshing in a moment.</Text></View>
+                ) : null}
+                <Text style={styles.moverDisclaimer}>24-hour market movement from CoinGecko. Data may be delayed. For research only—not investment advice.</Text>
+              </View>
+            ) : null}
             {(tab === 'NSE' || tab === 'BSE') ? (
               <View style={styles.moversPanel}>
                 <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>INDIAN EQUITY MARKETS</Text><Text style={styles.sectionTitle}>{tab} Top Movers</Text></View><Pressable onPress={() => void loadMarketMovers(tab)} style={styles.retryButton} accessibilityRole="button" accessibilityLabel={`Refresh ${tab} movers`}><Text style={styles.retryText}>Refresh</Text></Pressable></View>
@@ -1155,21 +1248,6 @@ export default function App() {
                 <Text style={styles.moverDisclaimer}>Market data may be delayed by the provider. For research only—not investment advice.</Text>
               </View>
             ) : null}
-            <View style={styles.sectionHeading}><View><Text style={styles.eyebrow}>INDIAN INDICES</Text><Text style={styles.sectionTitle}>Indian Market</Text></View></View>
-            <View style={styles.indexPanel}>
-              {INDIAN_INDICES.map(index => (
-                <View key={index.key} style={styles.indexRow}>
-                  <Text style={styles.indexName}>{index.label}</Text>
-                  {index.value !== null ? (
-                    <View style={styles.indexValues}>
-                      <Text style={styles.indexValue}>{index.value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</Text>
-                      {index.percentChange !== null ? <Text style={[styles.moverChange, index.percentChange >= 0 ? styles.moverPositive : styles.moverNegative]}>{index.percentChange >= 0 ? '+' : ''}{index.percentChange.toFixed(2)}%</Text> : null}
-                    </View>
-                  ) : <Text style={styles.indexUnavailable}>Index data unavailable</Text>}
-                </View>
-              ))}
-            </View>
-            <Text style={styles.moverDisclaimer}>BazaarNexa's market data provider currently publishes NSE/BSE top movers, not live index levels — see the NSE and BSE tabs for real-time stock data.</Text>
             <View style={styles.marketStrip}>
               <View style={styles.marketTile}><Text style={styles.marketEmoji}>₿</Text><View><Text style={styles.marketName}>CRYPTO</Text><Text style={styles.marketValue}>Digital assets</Text></View><Text style={styles.marketArrow}>↗</Text></View>
             </View>
