@@ -724,7 +724,12 @@ export default function App() {
         })
         const json = await response.json()
         if (response.ok && json.data) {
-          await finishTransactionRef.current?.({ purchase, isConsumable: false })
+          try {
+            await finishTransactionRef.current?.({ purchase, isConsumable: false })
+          } catch (finishError) {
+            // The server has verified and acknowledged the purchase already.
+            console.warn('Client transaction finalization failed after restored purchase verification:', finishError instanceof Error ? finishError.message : finishError)
+          }
           setActiveSubscription(json.data)
           restored = true
         }
@@ -1112,8 +1117,8 @@ export default function App() {
   if (screen === 'plans' || screen === 'payment') {
     const basicKey = `BASIC_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
     const proKey = `PRO_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
-    const basicPrice = billingProducts.find(item => item.id === PLAY_PRODUCTS[basicKey])?.displayPrice || (planCycle === 'monthly' ? '₹499 / month' : '₹3,599 / year')
-    const proPrice = billingProducts.find(item => item.id === PLAY_PRODUCTS[proKey])?.displayPrice || (planCycle === 'monthly' ? '₹999 / month' : '₹7,199 / year')
+    const basicPrice = billingProducts.find(item => item.id === PLAY_PRODUCTS[basicKey])?.displayPrice || 'Price in Google Play'
+    const proPrice = billingProducts.find(item => item.id === PLAY_PRODUCTS[proKey])?.displayPrice || 'Price in Google Play'
     const chosenProductKey = `${chosenPlan}_${planCycle.toUpperCase()}` as keyof typeof PLAY_PRODUCTS
     const chosenProductId = PLAY_PRODUCTS[chosenProductKey]
     const chosenProduct = billingProducts.find(item => item.id === chosenProductId)
@@ -1155,7 +1160,7 @@ export default function App() {
                 {['Everything in Basic', 'In-depth research reports', 'Company and sector deep-dives', 'Global market context', 'Early access to special reports', 'Access across devices'].map(item => <Text key={item} style={styles.planFeature}>✓  {item}</Text>)}
                 <Pressable onPress={() => choosePlan('PRO')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Choose Pro  →</Text></Pressable>
               </View>
-              <Text style={styles.disclaimer}>Prices shown are proposed display values and must match the final Google Play Console product prices before release. Subscriptions renew according to the selected Play Store plan.</Text>
+              <Text style={styles.disclaimer}>Google Play shows the final price, billing period, and renewal terms before you confirm a purchase. Prices appear here when the matching subscription products are configured.</Text>
             </>
           ) : (
             <>
@@ -1163,7 +1168,7 @@ export default function App() {
                 <Text style={styles.premiumText}>SECURE CHECKOUT</Text>
                 <Text style={styles.plansTitle}>{chosenPlan === 'BASIC' ? 'Basic' : 'Pro'} plan</Text>
                 <Text style={styles.planPrice}>{chosenPlan === 'BASIC' ? basicPrice : proPrice}</Text>
-                <Text style={styles.muted}>Payments are handled by Google Play on Android. Your subscription is activated only after the server verifies the purchase with Google Play.</Text>
+                <Text style={styles.muted}>Payments are handled by Google Play on Android. Final pricing and renewal terms are shown by Google Play, and access activates only after server verification.</Text>
               </View>
               <View style={styles.paymentMethod}>
                 <Text style={styles.paymentMethodTitle}>Google Play Billing</Text>
@@ -1173,7 +1178,7 @@ export default function App() {
                 <>
                   <View style={styles.activePlanCard}>
                     <Text style={styles.activePlanTitle}>Google Play product available</Text>
-                    <Text style={styles.muted}>{chosenProduct?.title || chosenProductId} · {chosenProduct?.displayPrice || (chosenPlan === 'BASIC' ? basicPrice : proPrice)}</Text>
+                    <Text style={styles.muted}>{chosenProduct?.title || chosenProductId} · {chosenProduct?.displayPrice || 'Price shown by Google Play at checkout'}</Text>
                   </View>
                   <Pressable onPress={buySelectedPlan} disabled={billingAction !== null} style={[styles.primaryButton, billingAction !== null && styles.disabled]}>
                     {billingAction === 'purchase' ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Continue with Google Play  →</Text>}
