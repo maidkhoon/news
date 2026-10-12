@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
+import { getAuthenticatedUser, getBearerToken } from "../lib/auth.js";
 
 const router = Router();
 const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
@@ -10,6 +11,21 @@ const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
 // with NVIDIA_MODEL if the configured account doesn't have access to it.
 const MODEL = process.env.NVIDIA_MODEL || "nvidia/nemotron-3-super-120b-a12b";
 const requestWindows = new Map();
+
+async function hasActiveSubscription(userId) {
+  const { data, error } = await supabase.from("subscriptions")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("status", "ACTIVE")
+    .gt("expiry_date", new Date().toISOString())
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("AI briefing subscription check failed:", error.message);
+    return false;
+  }
+  return Boolean(data);
+}
 
 function overBriefingLimit(key) {
   const now = Date.now();
@@ -57,13 +73,22 @@ router.post("/summary", async (req, res) => {
   if (!slug) return res.status(400).json({ error: "A valid article slug is required." });
 
   const { data: article, error } = await supabase.from("articles")
-    .select("id,title,content,source_url,source_name,published_at,categories(name)")
+    .select("id,title,content,access_type,source_url,source_name,published_at,categories(name)")
     .eq("slug", slug).eq("status", "PUBLISHED").maybeSingle();
   if (error) {
     console.error("Article briefing lookup failed:", error.message);
     return res.status(500).json({ error: "Unable to load this article." });
   }
   if (!article) return res.status(404).json({ error: "Article not found." });
+  if (article.access_type === "PREMIUM") {
+    const user = await getAuthenticatedUser(getBearerToken(req));
+    if (!user || !(await hasActiveSubscription(user.id))) {
+      return res.status(403).json({
+        error: "PREMIUM_REQUIRED",
+        message: "An active subscription is required."
+      });
+    }
+  }
   if (!process.env.NVIDIA_API_KEY) {
     return res.status(503).json({ error: "AI briefings are not configured yet. Add NVIDIA_API_KEY to the backend service environment." });
   }
