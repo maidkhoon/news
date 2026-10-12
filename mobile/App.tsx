@@ -160,7 +160,7 @@ export default function App() {
   const [briefingError, setBriefingError] = useState('')
   const [relatedStories, setRelatedStories] = useState<Article[]>([])
   const [relatedLoading, setRelatedLoading] = useState(false)
-  const [screen, setScreen] = useState<AppScreen>('home')
+  const [screen, setScreen] = useState<AppScreen>('auth')
   const [notificationItems, setNotificationItems] = useState<NewsNotification[]>([])
   const [notificationsLoading, setNotificationsLoading] = useState(false)
   const [activeSubscription, setActiveSubscription] = useState<Subscription | null>(null)
@@ -185,8 +185,9 @@ export default function App() {
 
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
+      setScreen(data.session ? 'home' : 'auth')
       setInitializing(false)
-    }).catch(() => setInitializing(false))
+    }).catch(() => { setScreen('auth'); setInitializing(false) })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession)
@@ -1127,6 +1128,7 @@ export default function App() {
                 <Pressable onPress={() => choosePlan('BASIC')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Choose Basic  →</Text></Pressable>
               </View>
               <View style={[styles.planCard, chosenPlan === 'PRO' && styles.planCardSelected]}>
+                <View style={styles.popularPlanBadge}><Text style={styles.popularPlanBadgeText}>MOST POPULAR</Text></View>
                 <View style={styles.planTitleRow}><Text style={styles.planName}>Pro</Text><Text style={styles.planPrice}>{proPrice}</Text></View>
                 {['Everything in Basic', 'In-depth research reports', 'Company and sector deep-dives', 'Global market context', 'Early access to special reports', 'Access across devices'].map(item => <Text key={item} style={styles.planFeature}>✓  {item}</Text>)}
                 <Pressable onPress={() => choosePlan('PRO')} style={styles.primaryButton}><Text style={styles.primaryButtonText}>Choose Pro  →</Text></Pressable>
@@ -1419,7 +1421,9 @@ const styles = StyleSheet.create({
   moverRankText: { color: COLORS.muted, fontSize: 10, fontWeight: '800' },
   cryptoCoinImage: { width: 26, height: 26, borderRadius: 13 },
 
-  purchaseSuccessContent: { flexGrow: 1, paddingHorizontal: 24, paddingVertical: 36, alignItems: 'center', justifyContent: 'center', gap: 15 },
+  popularPlanBadge: { alignSelf: 'flex-start', backgroundColor: '#123D37', borderColor: '#246F5E', borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 10 },
+  popularPlanBadgeText: { color: '#5BE0B0', fontSize: 9, fontWeight: '900', letterSpacing: 1 },
+  purchaseSuccessContent: { flexGrow: 1, paddingHorizontal: 24, paddingVertical: 36, alignItems: 'center', justifyContent: 'center', gap: 15 }
   successBrandLogo: { width: 64, height: 64, borderRadius: 19, backgroundColor: '#073C78', borderWidth: 1, borderColor: '#197FE4', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   successBrandArrow: { color: '#42C6FF', fontSize: 42, fontWeight: '900', position: 'absolute', top: 0, right: 10 },
   successBrandBars: { color: '#FFFFFF', fontSize: 26, fontWeight: '900', position: 'absolute', bottom: 5, left: 12 },
