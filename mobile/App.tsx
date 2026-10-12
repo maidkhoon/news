@@ -431,7 +431,7 @@ export default function App() {
       setMarketMovers(json as MarketMovers)
     } catch (error) {
       setMarketError(error instanceof Error ? error.message : 'Unable to load market movers.')
-      setMarketMovers(null)
+      // Keep the last successful snapshot visible during temporary provider failures.
     } finally { setMarketLoading(false) }
   }, [])
 
@@ -449,7 +449,7 @@ export default function App() {
       setCryptoMovers(json as CryptoMovers)
     } catch (error) {
       setCryptoError(error instanceof Error ? error.message : 'Unable to load crypto movers.')
-      setCryptoMovers(null)
+      // Keep the last successful snapshot visible during temporary provider failures.
     } finally { setCryptoLoading(false) }
   }, [])
 
