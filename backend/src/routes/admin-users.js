@@ -7,6 +7,13 @@ router.use(requireAdmin);
 
 const PLAN_TYPES = new Set(["BASIC_MONTHLY", "BASIC_YEARLY", "PRO_MONTHLY", "PRO_YEARLY"]);
 
+function requireMasterAdmin(req, res, next) {
+  if (req.adminProfile?.role !== "MASTER_ADMIN") {
+    return res.status(403).json({ error: "Master admin access required" });
+  }
+  return next();
+}
+
 async function audit(req, targetUserId, action, details = {}) {
   const { error } = await supabase.from("admin_audit_logs").insert({ actor_id: req.authUser.id, target_user_id: targetUserId, action, details });
   if (error) console.error("Admin audit log write failed:", error.message);
@@ -15,7 +22,7 @@ async function audit(req, targetUserId, action, details = {}) {
 router.get("/me", async (req, res) => {
   const { data, error } = await supabase.from("profiles").select("id,name,email,phone,role,status,created_at,updated_at").eq("id", req.authUser.id).maybeSingle();
   if (error) return res.status(500).json({ error: "Unable to load admin profile" });
-  if (!data || data.role !== "ADMIN" || data.status !== true) return res.status(403).json({ error: "Admin access required" });
+  if (!data || !["ADMIN", "MASTER_ADMIN"].includes(data.role) || data.status !== true) return res.status(403).json({ error: "Admin access required" });
   return res.json({ data });
 });
 
@@ -86,6 +93,15 @@ router.patch("/users/:id", async (req, res) => {
     updates.name = req.body.name.trim() || null;
   }
   if (!Object.keys(updates).length) return res.status(400).json({ error: "No valid fields supplied" });
+  const { data: targetProfile, error: targetLookupError } = await supabase.from("profiles")
+    .select("id,role")
+    .eq("id", req.params.id)
+    .maybeSingle();
+  if (targetLookupError) return res.status(500).json({ error: "Unable to verify target account" });
+  if (!targetProfile) return res.status(404).json({ error: "User not found" });
+  if (targetProfile.role === "MASTER_ADMIN" && req.params.id !== req.authUser.id) {
+    return res.status(403).json({ error: "The master-admin account is protected from other admins" });
+  }
   updates.updated_at = new Date().toISOString();
   const { data, error } = await supabase.from("profiles").update(updates)
     .eq("id", req.params.id)
@@ -99,7 +115,40 @@ router.patch("/users/:id", async (req, res) => {
   return res.json({ data });
 });
 
-router.post("/users/:id/plan", async (req, res) => {
+router.patch("/users/:id/role", requireMasterAdmin, async (req, res) => {
+  const role = String(req.body?.role || "").toUpperCase();
+  if (!["ADMIN", "USER"].includes(role)) {
+    return res.status(400).json({ error: "Role must be ADMIN or USER" });
+  }
+  if (req.params.id === req.authUser.id) {
+    return res.status(400).json({ error: "You cannot change your own role" });
+  }
+
+  const { data: target, error: lookupError } = await supabase.from("profiles")
+    .select("id,role")
+    .eq("id", req.params.id)
+    .maybeSingle();
+  if (lookupError) return res.status(500).json({ error: "Unable to verify target account" });
+  if (!target) return res.status(404).json({ error: "User not found" });
+  if (target.role === "MASTER_ADMIN") {
+    return res.status(409).json({ error: "The master-admin account cannot be changed from this screen" });
+  }
+
+  const { data, error } = await supabase.from("profiles")
+    .update({ role, updated_at: new Date().toISOString() })
+    .eq("id", req.params.id)
+    .select("id,name,email,phone,role,status,created_at,updated_at")
+    .maybeSingle();
+  if (error) {
+    console.error("Admin role update failed:", error.message);
+    return res.status(500).json({ error: "Unable to update user role" });
+  }
+  if (!data) return res.status(404).json({ error: "User not found" });
+  await audit(req, data.id, role === "ADMIN" ? "ADMIN_ASSIGNED" : "ADMIN_REMOVED", { previous_role: target.role, role });
+  return res.json({ data });
+});
+
+router.post("/users/:id/plan", requireMasterAdmin, async (req, res) => {
   const planType = String(req.body?.plan_type || "").toUpperCase();
   const expiryDate = req.body?.expiry_date;
   if (!PLAN_TYPES.has(planType)) return res.status(400).json({ error: "Choose a supported paid plan" });
@@ -139,7 +188,7 @@ router.post("/users/:id/plan", async (req, res) => {
   return res.status(201).json({ data, note: "Manual entitlement applied; this does not change or charge a Google Play purchase." });
 });
 
-router.post("/users/:id/free-plan", async (req, res) => {
+router.post("/users/:id/free-plan", requireMasterAdmin, async (req, res) => {
   const { data: profile, error: profileError } = await supabase.from("profiles")
     .select("id").eq("id", req.params.id).maybeSingle();
   if (profileError) return res.status(500).json({ error: "Unable to verify user" });
