@@ -15,6 +15,7 @@ on:
     paths:
       - "mobile/**"
       - "backend/**"
+      - "admin/**"
       - "tools/bazaarnexa-mcp/**"
       - ".github/workflows/validate.yml"
 
