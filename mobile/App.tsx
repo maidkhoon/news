@@ -28,6 +28,7 @@ import {
 import type { Session } from '@supabase/supabase-js'
 import { supabase, supabaseConfigError } from './lib/supabase'
 import { parseGoogleAuthCallback } from './lib/googleAuthCallback'
+import AdminDashboard from './components/AdminDashboard'
 
 type AuthStep = 'phone' | 'otp'
 type Category = { id: string; name: string; slug: string }
@@ -45,7 +46,7 @@ type Article = {
   categories?: { name?: string; slug?: string } | null
 }
 type Tab = 'Home' | 'Crypto' | 'NSE' | 'BSE' | 'Cricket'
-type AppScreen = 'home' | 'plans' | 'payment' | 'purchase-success' | 'notifications' | 'saved' | 'auth' | 'referrals' | 'profile'
+type AppScreen = 'home' | 'plans' | 'payment' | 'purchase-success' | 'notifications' | 'saved' | 'auth' | 'referrals' | 'profile' | 'admin'
 type ReferralSummary = { code: string; link: string; rewardDays: number; successful: number; pending: number; referrals: Array<{ id: string; status: string; created_at: string; rewarded_at?: string | null }>; appliedReferral: { status: string; reward_days: number; rewarded_at?: string | null } | null }
 type NewsNotification = { id: string; title: string; message: string; article_id?: string | null; created_at: string; articles?: { slug?: string } | null }
 type Subscription = { id: string; plan_type: string; product_id?: string; status: string; expiry_date: string; auto_renewing: boolean }
@@ -169,6 +170,22 @@ export default function App() {
   const [billingAction, setBillingAction] = useState<'purchase' | 'restore' | null>(null)
   const finishTransactionRef = useRef<((args: any) => Promise<any>) | null>(null)
 
+  const resolveSessionScreen = useCallback(async (nextSession: Session | null) => {
+    if (!nextSession) {
+      setScreen('auth')
+      return
+    }
+    try {
+      const response = await fetch(API_BASE + '/api/admin/me', {
+        headers: { Authorization: `Bearer ${nextSession.access_token}` }
+      })
+      setScreen(response.ok ? 'admin' : 'home')
+    } catch {
+      // Admin lookup failure must not block normal news browsing.
+      setScreen('home')
+    }
+  }, [])
+
   useEffect(() => {
     AsyncStorage.getItem(TOPICS_STORAGE_KEY).then(value => {
       if (value) {
@@ -184,17 +201,18 @@ export default function App() {
       }
     }).catch(() => undefined).finally(() => setSavedLoaded(true))
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       setSession(data.session)
-      setScreen(data.session ? 'home' : 'auth')
+      await resolveSessionScreen(data.session)
       setInitializing(false)
     }).catch(() => { setScreen('auth'); setInitializing(false) })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession)
+      void resolveSessionScreen(nextSession)
     })
     return () => subscription.unsubscribe()
-  }, [])
+  }, [resolveSessionScreen])
 
   const signInWithGoogle = async () => {
     if (authLoading) return
@@ -943,6 +961,10 @@ export default function App() {
         <Text style={styles.disclaimer}>Research and educational content only. Not investment advice.</Text>
       </SafeAreaView>
     )
+  }
+
+  if (screen === 'admin' && session) {
+    return <AdminDashboard apiBase={API_BASE} accessToken={session.access_token} onSignOut={() => { void supabase.auth.signOut() }} />
   }
 
   if (screen === 'profile') {
