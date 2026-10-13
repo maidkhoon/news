@@ -3,7 +3,7 @@ import { ActivityIndicator, Alert, Pressable, SafeAreaView, ScrollView, StatusBa
 
 type AdminArticle = { id: string; title: string; status: string; access_type: string; updated_at?: string; categories?: { name?: string } | null }
 type AdminCategory = { id: string; name: string; slug: string }
-type AdminUser = { id: string; name?: string | null; email?: string | null; role?: string | null; status?: boolean | null; subscription?: { plan_type?: string; status?: string } | null }
+type AdminUser = { id: string; name?: string | null; email?: string | null; role?: string | null; status?: boolean | null; subscription?: { id?: string; plan_type?: string; status?: string; expiry_date?: string; active?: boolean } | null }
 type Props = { apiBase: string; accessToken: string; onSignOut: () => void }
 
 const palette = { bg: '#07111F', panel: '#101F31', border: '#20344B', text: '#F3F7FC', muted: '#9BAEC3', blue: '#3988F5', gold: '#F1C75B', green: '#5AD5A0', red: '#FF8A8A' }
@@ -14,6 +14,7 @@ export default function AdminDashboard({ apiBase, accessToken, onSignOut }: Prop
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [adminName, setAdminName] = useState('Administrator')
+  const [masterAdmin, setMasterAdmin] = useState(false)
   const [articles, setArticles] = useState<AdminArticle[]>([])
   const [categories, setCategories] = useState<AdminCategory[]>([])
   const [users, setUsers] = useState<AdminUser[]>([])
@@ -40,6 +41,7 @@ export default function AdminDashboard({ apiBase, accessToken, onSignOut }: Prop
         request('/api/admin/categories'), request('/api/admin/users'),
       ])
       setAdminName(profile.data?.name || profile.data?.email || 'Administrator')
+      setMasterAdmin(profile.data?.role === 'MASTER_ADMIN')
       setArticles(Array.isArray(articleResult.data) ? articleResult.data : [])
       setCategories(Array.isArray(categoryResult.data) ? categoryResult.data : [])
       setUsers(Array.isArray(userResult.data) ? userResult.data : [])
@@ -75,6 +77,44 @@ export default function AdminDashboard({ apiBase, accessToken, onSignOut }: Prop
     try { await request('/api/admin/categories', { method: 'POST', body: JSON.stringify({ name: categoryName.trim() }) }); setCategoryName(''); await refresh() }
     catch (e) { Alert.alert('Category creation failed', e instanceof Error ? e.message : 'Please try again.') }
     finally { setBusy(false) }
+  }
+
+  const changeRole = async (user: AdminUser, role: 'ADMIN' | 'USER') => {
+    const action = role === 'ADMIN' ? 'assign admin access to' : 'remove admin access from'
+    Alert.alert('Confirm role change', `Are you sure you want to ${action} ${user.name || user.email || 'this user'}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Confirm', onPress: () => {
+        setBusy(true)
+        void request('/api/admin/users/' + encodeURIComponent(user.id) + '/role', {
+          method: 'PATCH', body: JSON.stringify({ role })
+        }).then(() => refresh()).catch(e => Alert.alert('Role update failed', e instanceof Error ? e.message : 'Please try again.')).finally(() => setBusy(false))
+      } }
+    ])
+  }
+
+  const assignPlan = async (user: AdminUser, planType: 'BASIC_MONTHLY' | 'BASIC_YEARLY' | 'PRO_MONTHLY' | 'PRO_YEARLY', days: number) => {
+    Alert.alert('Confirm plan assignment', `Assign ${planType.replace('_', ' ')} to ${user.name || user.email || 'this user'} for ${days} days? This is a manual entitlement and does not charge Google Play.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Assign plan', onPress: () => {
+        const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
+        setBusy(true)
+        void request('/api/admin/users/' + encodeURIComponent(user.id) + '/plan', {
+          method: 'POST', body: JSON.stringify({ plan_type: planType, expiry_date: expiry })
+        }).then(() => refresh()).catch(e => Alert.alert('Plan assignment failed', e instanceof Error ? e.message : 'Please try again.')).finally(() => setBusy(false))
+      } }
+    ])
+  }
+
+  const removePlan = (user: AdminUser) => {
+    Alert.alert('Remove paid plan?', `Move ${user.name || user.email || 'this user'} to Free access? This does not cancel any Google Play subscription.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove plan', style: 'destructive', onPress: () => {
+        setBusy(true)
+        void request('/api/admin/users/' + encodeURIComponent(user.id) + '/free-plan', {
+          method: 'POST', body: JSON.stringify({})
+        }).then(() => refresh()).catch(e => Alert.alert('Plan removal failed', e instanceof Error ? e.message : 'Please try again.')).finally(() => setBusy(false))
+      } }
+    ])
   }
 
   const stat = (label: string, value: number, accent: string) => <View key={label} style={styles.stat}><Text style={[styles.statValue, { color: accent }]}>{value}</Text><Text style={styles.muted}>{label}</Text></View>
@@ -118,7 +158,27 @@ export default function AdminDashboard({ apiBase, accessToken, onSignOut }: Prop
           <View style={styles.card}><Text style={styles.sectionTitle}>Add category</Text><TextInput value={categoryName} onChangeText={setCategoryName} placeholder="Category name" placeholderTextColor={palette.muted} style={styles.input} maxLength={80} />{button('Create category', () => void createCategory())}</View>
           {categories.map(category => <View key={category.id} style={styles.card}><Text style={styles.cardTitle}>{category.name}</Text><Text style={styles.muted}>/{category.slug}</Text></View>)}
         </>}
-        {tab === 'Users' && users.map(user => <View key={user.id} style={styles.card}><Text style={styles.cardTitle}>{user.name || user.email || 'BazaarNexa user'}</Text><Text style={styles.muted}>{user.email || 'No email'} · {user.role || 'USER'} · {user.status ? 'Active' : 'Disabled'}</Text><Text style={styles.muted}>Plan: {user.subscription?.plan_type || 'Free'}</Text></View>)}
+        {tab === 'Users' && users.map(user => <View key={user.id} style={styles.card}>
+          <Text style={styles.cardTitle}>{user.name || user.email || 'BazaarNexa user'}</Text>
+          <Text style={styles.muted}>{user.email || 'No email'} · {user.role || 'USER'} · {user.status ? 'Active' : 'Disabled'}</Text>
+          <Text style={styles.muted}>Plan: {user.subscription?.plan_type || 'Free'}{user.subscription?.expiry_date ? ` · expires ${new Date(user.subscription.expiry_date).toLocaleDateString()}` : ''}</Text>
+          {masterAdmin && user.role !== 'MASTER_ADMIN' && <>
+            <Text style={styles.fieldLabel}>Role permissions</Text>
+            <View style={styles.actions}>
+              {user.role === 'ADMIN'
+                ? button('Remove admin', () => void changeRole(user, 'USER'), true)
+                : button('Assign admin', () => void changeRole(user, 'ADMIN'))}
+            </View>
+            <Text style={styles.fieldLabel}>Subscription controls</Text>
+            <View style={styles.actions}>
+              {button('Basic 1M', () => void assignPlan(user, 'BASIC_MONTHLY', 30), true)}
+              {button('Basic 1Y', () => void assignPlan(user, 'BASIC_YEARLY', 365), true)}
+              {button('Pro 1M', () => void assignPlan(user, 'PRO_MONTHLY', 30), true)}
+              {button('Pro 1Y', () => void assignPlan(user, 'PRO_YEARLY', 365), true)}
+              {button('Remove plan', () => removePlan(user), true)}
+            </View>
+          </>}
+        </View>)}
         {tab === 'Profile' && <View style={styles.card}><Text style={styles.sectionTitle}>Administrator profile</Text><Text style={styles.cardTitle}>{adminName}</Text><Text style={styles.muted}>Your administrator role is verified by the BazaarNexa backend. Admin API requests require your current Supabase session.</Text>{button('Refresh profile', () => void refresh(), true)}{button('Sign out', onSignOut)}</View>}
         <Pressable onPress={() => void refresh()} style={styles.refresh}><Text style={styles.refreshText}>↻  Refresh newsroom data</Text></Pressable>
       </>}
