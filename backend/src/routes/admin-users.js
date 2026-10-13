@@ -22,7 +22,7 @@ async function audit(req, targetUserId, action, details = {}) {
 router.get("/me", async (req, res) => {
   const { data, error } = await supabase.from("profiles").select("id,name,email,phone,role,status,created_at,updated_at").eq("id", req.authUser.id).maybeSingle();
   if (error) return res.status(500).json({ error: "Unable to load admin profile" });
-  if (!data || data.role !== "ADMIN" || data.status !== true) return res.status(403).json({ error: "Admin access required" });
+  if (!data || !["ADMIN", "MASTER_ADMIN"].includes(data.role) || data.status !== true) return res.status(403).json({ error: "Admin access required" });
   return res.json({ data });
 });
 
