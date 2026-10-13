@@ -5,12 +5,17 @@
     "version": "0.2.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
     "android": {
       "package": "com.maidkhoon.news",
       "permissions": [
         "NOTIFICATIONS",
         "VIBRATE"
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#0B1220"
+      }
     },
     "plugins": [
       [
