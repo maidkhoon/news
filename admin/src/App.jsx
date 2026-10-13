@@ -40,6 +40,8 @@ function App() {
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginMessage, setLoginMessage] = useState("");
   const [categories, setCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [categoryLoadError, setCategoryLoadError] = useState("");
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -104,23 +106,35 @@ function App() {
     return result;
   }, []);
 
+  const loadCategories = useCallback(async () => {
+    if (!session) return;
+    setCategoriesLoading(true);
+    setCategoryLoadError("");
+    try {
+      const response = await apiFetch("/api/admin/categories");
+      if (!Array.isArray(response.data)) throw new Error("The categories endpoint returned an unexpected response.");
+      setCategories(response.data);
+      if (response.data.length === 0) {
+        setCategoryLoadError("No categories exist yet. Open Categories and create one before writing an article.");
+      }
+    } catch (err) {
+      setCategories([]);
+      setCategoryLoadError(err.message || "Unable to load categories. Retry or check admin API access.");
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, [session, apiFetch]);
+
   const loadData = useCallback(async () => {
     if (!session) return;
     setLoading(true);
     setError("");
-    try {
-      const [categoryResponse, articleResponse] = await Promise.all([
-        apiFetch("/api/admin/categories"),
-        apiFetch("/api/admin/articles?page=1&limit=100"),
-      ]);
-      setCategories(categoryResponse.data || []);
-      setArticles(articleResponse.data || []);
-    } catch (err) {
-      setError(err.message || "Unable to load the dashboard.");
-    } finally {
-      setLoading(false);
-    }
-  }, [session, apiFetch]);
+    const articleRequest = apiFetch("/api/admin/articles?page=1&limit=100")
+      .then((response) => setArticles(Array.isArray(response.data) ? response.data : []))
+      .catch((err) => setError(err.message || "Unable to load articles."));
+    await Promise.all([loadCategories(), articleRequest]);
+    setLoading(false);
+  }, [session, apiFetch, loadCategories]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -504,7 +518,7 @@ function App() {
           <div className="modal-header"><div><p className="eyebrow">{editingId ? "CONTENT EDITOR" : "NEW CONTENT"}</p><h2 id="editor-title">{editingId ? "Edit article" : "Create an article"}</h2></div><button className="icon-button close-button" onClick={() => setEditorOpen(false)} aria-label="Close editor">×</button></div>
           <form onSubmit={saveArticle} className="editor-form">
             <label>Article title<input name="title" value={form.title} onChange={changeForm} maxLength="240" placeholder="Write a clear, specific headline" required /></label>
-            <div className="form-two-col"><label>Category<select name="category_id" value={form.category_id} onChange={changeForm} required><option value="">Choose category</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Content access<select name="access_type" value={form.access_type} onChange={changeForm}><option value="FREE">Free</option><option value="PREMIUM">Premium</option></select></label></div>
+            <div className="form-two-col"><label>Category<select name="category_id" value={form.category_id} onChange={changeForm} required disabled={categoriesLoading || categories.length === 0}><option value="">{categoriesLoading ? "Loading categories…" : categories.length ? "Choose category" : "No categories available"}</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>{categoryLoadError && <span className="error-message" role="status">{categoryLoadError} <button type="button" className="secondary-button compact-button" onClick={loadCategories} disabled={categoriesLoading}>{categoriesLoading ? "Loading…" : "Retry"}</button>{!categoriesLoading && categories.length === 0 && <button type="button" className="secondary-button compact-button" onClick={() => { setEditorOpen(false); setPage("categories"); }}>Manage categories</button>}</span>}</label><label>Content access<select name="access_type" value={form.access_type} onChange={changeForm}><option value="FREE">Free</option><option value="PREMIUM">Premium</option></select></label></div>
             <div className="image-upload-panel">
               <div className="image-upload-heading"><div><strong>Cover image</strong><p>Upload, resize and crop before saving the article.</p></div><span className="optional-label">Optional</span></div>
               <div className="form-two-col">
@@ -517,7 +531,7 @@ function App() {
             </div>
             <label>Article content<textarea name="content" value={form.content} onChange={changeForm} rows="10" placeholder="Write your article or research here…" required /></label>
             <label>Publishing status<select name="status" value={form.status} onChange={changeForm}><option value="DRAFT">Save as draft</option><option value="PUBLISHED">Publish now</option><option value="UNPUBLISHED">Unpublished</option></select></label>
-            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes" : "Create article"}</button></div>
+            <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setEditorOpen(false)}>Cancel</button><button className="primary-button" disabled={saving || categoriesLoading || !categories.length || !form.category_id}>{saving ? "Saving…" : editingId ? "Save changes" : "Create article"}</button></div>
           </form>
         </section>
       </div>}
