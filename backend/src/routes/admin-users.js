@@ -93,6 +93,15 @@ router.patch("/users/:id", async (req, res) => {
     updates.name = req.body.name.trim() || null;
   }
   if (!Object.keys(updates).length) return res.status(400).json({ error: "No valid fields supplied" });
+  const { data: targetProfile, error: targetLookupError } = await supabase.from("profiles")
+    .select("id,role")
+    .eq("id", req.params.id)
+    .maybeSingle();
+  if (targetLookupError) return res.status(500).json({ error: "Unable to verify target account" });
+  if (!targetProfile) return res.status(404).json({ error: "User not found" });
+  if (targetProfile.role === "MASTER_ADMIN" && req.params.id !== req.authUser.id) {
+    return res.status(403).json({ error: "The master-admin account is protected from other admins" });
+  }
   updates.updated_at = new Date().toISOString();
   const { data, error } = await supabase.from("profiles").update(updates)
     .eq("id", req.params.id)
