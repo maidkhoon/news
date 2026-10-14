@@ -114,6 +114,7 @@ function readableDate(value?: string | null) {
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [initializing, setInitializing] = useState(true)
   const [step, setStep] = useState<AuthStep>('phone')
   const [phone, setPhone] = useState('')
@@ -172,6 +173,7 @@ export default function App() {
 
   const resolveSessionScreen = useCallback(async (nextSession: Session | null) => {
     if (!nextSession) {
+      setIsAdmin(false)
       setScreen('auth')
       return
     }
@@ -179,10 +181,15 @@ export default function App() {
       const response = await fetch(API_BASE + '/api/admin/me', {
         headers: { Authorization: `Bearer ${nextSession.access_token}` }
       })
-      setScreen(response.ok ? 'admin' : 'home')
+      const adminAccess = response.ok
+      setIsAdmin(adminAccess)
+      // Admins enter the regular app first. The newsroom remains available
+      // from their profile, so admin privileges do not replace user features.
+      setScreen(current => current === 'admin' && adminAccess ? 'admin' : 'home')
     } catch {
       // Admin lookup failure must not block normal news browsing.
-      setScreen('home')
+      setIsAdmin(false)
+      setScreen(current => current === 'admin' || current === 'auth' ? 'home' : current)
     }
   }, [])
 
@@ -963,8 +970,8 @@ export default function App() {
     )
   }
 
-  if (screen === 'admin' && session) {
-    return <AdminDashboard apiBase={API_BASE} accessToken={session.access_token} onSignOut={() => { void supabase.auth.signOut() }} />
+  if (screen === 'admin' && session && isAdmin) {
+    return <AdminDashboard apiBase={API_BASE} accessToken={session.access_token} onClose={() => setScreen('home')} onSignOut={() => { void supabase.auth.signOut() }} />
   }
 
   if (screen === 'profile') {
@@ -1007,6 +1014,15 @@ export default function App() {
             <Pressable onPress={() => { void loadReferralSummary() }} style={styles.profileAction}><View style={styles.profileActionIcon}><Text style={styles.profileActionGlyph}>↗</Text></View><View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Referral rewards</Text><Text style={styles.profileActionSubtitle}>Invite friends and view rewards</Text></View><Text style={styles.profileActionArrow}>›</Text></Pressable>
             <Pressable onPress={() => { setScreen('notifications'); void loadNotifications() }} style={styles.profileAction}><View style={styles.profileActionIcon}><Text style={styles.profileActionGlyph}>♧</Text></View><View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Notifications</Text><Text style={styles.profileActionSubtitle}>Market alerts and research updates</Text></View><Text style={styles.profileActionArrow}>›</Text></Pressable>
           </View>
+          {isAdmin ? <View style={styles.profileSection}>
+            <Text style={styles.profileSectionTitle}>Administration</Text>
+            <Text style={styles.profileHelp}>Your account has newsroom permissions. You can keep using BazaarNexa normally and open the admin tools whenever you need them.</Text>
+            <Pressable onPress={() => setScreen('admin')} style={styles.profileAction} accessibilityRole="button" accessibilityLabel="Open admin dashboard">
+              <View style={[styles.profileActionIcon, { backgroundColor: '#123B34' }]}><Text style={[styles.profileActionGlyph, { color: '#5AD5A0' }]}>⚙</Text></View>
+              <View style={styles.profileActionCopy}><Text style={styles.profileActionTitle}>Admin Dashboard</Text><Text style={styles.profileActionSubtitle}>Manage articles, categories and users</Text></View>
+              <Text style={styles.profileActionArrow}>›</Text>
+            </Pressable>
+          </View> : null}
           <View style={styles.profileSection}>
             <Text style={styles.profileSectionTitle}>Account</Text>
             <View style={styles.profileMetaRow}><Text style={styles.profileMetaLabel}>Member since</Text><Text style={styles.profileMetaValue}>{joined}</Text></View>

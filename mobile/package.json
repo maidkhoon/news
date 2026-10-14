@@ -25,7 +25,9 @@
     "react-native-url-polyfill": "^2.0.0",
     "react-native-web": "^0.21.2",
     "expo-linking": "~57.0.12",
-    "expo-web-browser": "~57.0.3"
+    "expo-web-browser": "~57.0.3",
+    "expo-image-picker": "~57.0.20",
+    "expo-image-manipulator": "~57.0.21"
   },
   "devDependencies": {
     "@types/react": "~19.2.4",

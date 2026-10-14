@@ -25,7 +25,13 @@
           "defaultChannel": "market-research"
         }
       ],
-      "expo-iap"
+      "expo-iap",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow BazaarNexa admins to choose article cover images."
+        }
+      ]
     ],
     "extra": {
       "apiBaseUrl": "https://news-api-egmd.onrender.com",
