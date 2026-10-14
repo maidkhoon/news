@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
 import { createClient } from "@supabase/supabase-js";
@@ -91,6 +92,14 @@ async function api(path, options = {}, retry = true) {
 const server = new McpServer({ name: "bazaarnexa-local", version: "0.1.0" });
 const jsonResult = (value) => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }] });
 
+// Same title+category+content submitted again (tool retry, accidental
+// double-call) hashes to the same key, so the admin API returns the
+// original draft instead of creating a duplicate article.
+function draftIdempotencyKey({ title, category_id, content }) {
+  const normalized = `${title.trim().toLowerCase()}|${category_id}|${content.trim()}`;
+  return createHash("sha256").update(normalized).digest("hex");
+}
+
 server.tool(
   "list_categories",
   "List BazaarNexa categories and their IDs. Use the returned category ID when saving a draft.",
@@ -162,6 +171,7 @@ server.tool(
   async ({ title, content, category_id, source_url, source_name, image_url, access_type }) => {
     const result = await api("/api/admin/articles", {
       method: "POST",
+      headers: { "Idempotency-Key": draftIdempotencyKey({ title, category_id, content }) },
       body: JSON.stringify({
         title, content, category_id, source_url: source_url || null,
         source_name: source_name || null, image_url: image_url || null,

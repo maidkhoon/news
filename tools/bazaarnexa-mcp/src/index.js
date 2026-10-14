@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -13,13 +14,14 @@ if (!accessToken) {
 
 const server = new McpServer({ name: "bazaarnexa-local", version: "0.1.0" });
 
-async function api(path, { method = "GET", body } = {}) {
+async function api(path, { method = "GET", body, headers } = {}) {
   const response = await fetch(`${apiBase}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/json",
-      ...(body ? { "Content-Type": "application/json" } : {})
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...headers
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
     signal: AbortSignal.timeout(20_000)
@@ -35,6 +37,14 @@ async function api(path, { method = "GET", body } = {}) {
 
 function result(data) {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+}
+
+// Same title+category+content submitted again (tool retry, accidental
+// double-call) hashes to the same key, so the admin API returns the
+// original draft instead of creating a duplicate article.
+function draftIdempotencyKey({ title, category_id, content }) {
+  const normalized = `${title.trim().toLowerCase()}|${category_id}|${content.trim()}`;
+  return createHash("sha256").update(normalized).digest("hex");
 }
 
 server.registerTool(
@@ -78,7 +88,8 @@ server.registerTool(
     const body = { title, content, category_id, access_type, status: "DRAFT" };
     if (slug) body.slug = slug;
     if (image_url !== undefined) body.image_url = image_url;
-    return result(await api("/api/admin/articles", { method: "POST", body }));
+    const headers = { "Idempotency-Key": draftIdempotencyKey({ title, category_id, content }) };
+    return result(await api("/api/admin/articles", { method: "POST", body, headers }));
   }
 );
 

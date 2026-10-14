@@ -2,6 +2,7 @@ import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import { requireAdmin } from "../middleware/require-admin.js";
 import { sendArticlePush } from "../lib/push.js";
+import { withIdempotency } from "../lib/idempotency.js";
 
 const router = Router();
 
@@ -111,22 +112,31 @@ router.post("/articles", async (req, res) => {
     published_at: status === "PUBLISHED" ? new Date().toISOString() : null
   };
 
-  const { data, error } = await supabase
-    .from("articles")
-    .insert(payload)
-    .select(articleFields)
-    .single();
+  const result = await withIdempotency({
+    actorId: req.authUser.id,
+    scope: "admin_article_create",
+    key: req.get("Idempotency-Key"),
+    payload,
+    handler: async () => {
+      const { data, error } = await supabase
+        .from("articles")
+        .insert(payload)
+        .select(articleFields)
+        .single();
 
-  if (error) {
-    if (error.code === "23505") return res.status(409).json({ error: "An article with this slug already exists" });
-    if (error.code === "23503") return res.status(400).json({ error: "Category or admin profile was not found" });
-    console.error("Admin article create failed:", error.message);
-    return res.status(500).json({ error: "Unable to create article" });
-  }
+      if (error) {
+        if (error.code === "23505") return { status: 409, body: { error: "An article with this slug already exists" } };
+        if (error.code === "23503") return { status: 400, body: { error: "Category or admin profile was not found" } };
+        console.error("Admin article create failed:", error.message);
+        return { status: 500, body: { error: "Unable to create article" } };
+      }
 
-  if (status === "PUBLISHED") await notifyPublished(data);
+      if (status === "PUBLISHED") await notifyPublished(data);
+      return { status: 201, body: { data } };
+    }
+  });
 
-  return res.status(201).json({ data });
+  return res.status(result.status).json(result.body);
 });
 
 router.patch("/articles/:id", async (req, res) => {
@@ -154,6 +164,16 @@ router.patch("/articles/:id", async (req, res) => {
 
   if (!Object.keys(payload).length) return res.status(400).json({ error: "No editable fields supplied" });
 
+  // Retrying a "publish" request (double-submit, client retry) must not
+  // resend the publish notification. Check the pre-update status so only a
+  // genuine DRAFT/UNPUBLISHED -> PUBLISHED transition notifies.
+  const willPublish = payload.status === "PUBLISHED";
+  let wasAlreadyPublished = false;
+  if (willPublish) {
+    const { data: current } = await supabase.from("articles").select("status").eq("id", req.params.id).maybeSingle();
+    wasAlreadyPublished = current?.status === "PUBLISHED";
+  }
+
   const { data, error } = await supabase
     .from("articles")
     .update(payload)
@@ -169,7 +189,7 @@ router.patch("/articles/:id", async (req, res) => {
   }
 
   if (!data) return res.status(404).json({ error: "Article not found" });
-  if (body.status === "PUBLISHED") await notifyPublished(data);
+  if (willPublish && !wasAlreadyPublished) await notifyPublished(data);
   return res.json({ data });
 });
 
