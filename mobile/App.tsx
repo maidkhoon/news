@@ -189,7 +189,7 @@ export default function App() {
     } catch {
       // Admin lookup failure must not block normal news browsing.
       setIsAdmin(false)
-      setScreen(current => current === 'admin' ? 'home' : current)
+      setScreen(current => current === 'admin' || current === 'auth' ? 'home' : current)
     }
   }, [])
 
