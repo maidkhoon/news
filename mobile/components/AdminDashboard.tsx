@@ -7,11 +7,11 @@ import { supabase } from '../lib/supabase'
 type AdminArticle = { id: string; title: string; content?: string; image_url?: string | null; category_id?: string; status: string; access_type: string; updated_at?: string; categories?: { name?: string } | null }
 type AdminCategory = { id: string; name: string; slug: string }
 type AdminUser = { id: string; name?: string | null; email?: string | null; role?: string | null; status?: boolean | null; subscription?: { id?: string; plan_type?: string; status?: string; expiry_date?: string; active?: boolean } | null }
-type Props = { apiBase: string; accessToken: string; onSignOut: () => void }
+type Props = { apiBase: string; accessToken: string; onClose: () => void; onSignOut: () => void }
 
 const palette = { bg: '#07111F', panel: '#101F31', border: '#20344B', text: '#F3F7FC', muted: '#9BAEC3', blue: '#3988F5', gold: '#F1C75B', green: '#5AD5A0', red: '#FF8A8A' }
 
-export default function AdminDashboard({ apiBase, accessToken, onSignOut }: Props) {
+export default function AdminDashboard({ apiBase, accessToken, onClose, onSignOut }: Props) {
   const [tab, setTab] = useState<'Overview' | 'Articles' | 'Categories' | 'Users' | 'Profile'>('Overview')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -259,7 +259,10 @@ export default function AdminDashboard({ apiBase, accessToken, onSignOut }: Prop
     <View style={styles.header}>
       <View style={styles.brandIcon}><Text style={styles.brandLetter}>N</Text></View>
       <View style={{ flex: 1 }}><Text style={styles.brand}>BazaarNexa <Text style={{ color: palette.gold }}>Newsroom</Text></Text><Text style={styles.muted}>ADMIN CONSOLE · {adminName}</Text></View>
-      <Pressable onPress={onSignOut} style={styles.signOut}><Text style={styles.signOutText}>Sign out</Text></Pressable>
+      <View style={styles.headerActions}>
+        <Pressable onPress={onClose} style={[styles.signOut, styles.appSwitch]} accessibilityRole="button" accessibilityLabel="Return to user app"><Text style={styles.signOutText}>User app</Text></Pressable>
+        <Pressable onPress={onSignOut} style={styles.signOut}><Text style={styles.signOutText}>Sign out</Text></Pressable>
+      </View>
     </View>
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabs} contentContainerStyle={{ gap: 8 }}>
       {(['Overview', 'Articles', 'Categories', 'Users', 'Profile'] as const).map(item => <Pressable key={item} onPress={() => setTab(item)} style={[styles.tab, tab === item && styles.activeTab]}><Text style={[styles.tabText, tab === item && styles.activeTabText]}>{item}</Text></Pressable>)}
@@ -338,6 +341,8 @@ const styles = StyleSheet.create({
   brandLetter: { color: '#FFFFFF', fontSize: 21, fontWeight: '900' },
   brand: { color: palette.text, fontSize: 17, fontWeight: '900' },
   muted: { color: palette.muted, fontSize: 12, lineHeight: 18 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  appSwitch: { backgroundColor: '#123B34', borderColor: '#276E5A' },
   signOut: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: palette.border },
   signOutText: { color: palette.text, fontSize: 12, fontWeight: '800' },
   tabs: { maxHeight: 54, borderBottomWidth: 1, borderBottomColor: palette.border },
