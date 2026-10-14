@@ -62,6 +62,7 @@ export default function AdminDashboard({ apiBase, accessToken, onSignOut }: Prop
   useEffect(() => { void refresh() }, [refresh])
 
   const chooseCoverImage = async () => {
+    if (imageProcessing || busy) return
     setError('')
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -165,21 +166,24 @@ export default function AdminDashboard({ apiBase, accessToken, onSignOut }: Prop
     try {
       let imageUrl = coverImageUrl
       if (coverImageDirty) imageUrl = coverImageUri ? await uploadCoverImage(coverImageUri) : null
-      const payload = {
+      const articleFields = {
         title: title.trim(),
         content: body.trim(),
         category_id: categoryId,
-        status: editingArticle ? editingArticle.status : status,
-        access_type: editingArticle?.access_type || 'FREE',
         image_url: imageUrl,
       }
       if (editingArticle) {
+        // Do not resend status while editing a published article: the backend treats
+        // status=PUBLISHED as a publish action and would send a duplicate notification.
         await request('/api/admin/articles/' + encodeURIComponent(editingArticle.id), {
           method: 'PATCH',
-          body: JSON.stringify(payload),
+          body: JSON.stringify(articleFields),
         })
       } else {
-        await request('/api/admin/articles', { method: 'POST', body: JSON.stringify(payload) })
+        await request('/api/admin/articles', {
+          method: 'POST',
+          body: JSON.stringify({ ...articleFields, status, access_type: 'FREE' }),
+        })
       }
       resetArticleEditor()
       await refresh()
