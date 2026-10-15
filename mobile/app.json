@@ -29,7 +29,9 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow BazaarNexa admins to choose article cover images."
+          "photosPermission": "Allow BazaarNexa admins to choose article cover images.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ]
     ],
