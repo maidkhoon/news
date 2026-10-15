@@ -1,5 +1,9 @@
 # Database indexing and idempotency
 
+## Migration status and ordering
+
+The repository previously had two files using version 202610140001. The Master Admin image-policy migration is now version 202610140005; migration filenames are checked for unique versions by npm run check:migrations and CI. This fixes the repository filename collision only; it does not reconcile the live Supabase migration history. See SUPABASE_MIGRATION_REVIEW.md before applying migrations.
+
 ## Indexing (backend/supabase/migrations/202610140001_article_admin_listing_indexes.sql)
 
 Added to cover query shapes that existing indexes didn't:

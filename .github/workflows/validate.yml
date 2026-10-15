@@ -45,6 +45,8 @@ jobs:
           node-version: 22
       - run: npm install
       - run: find src -name '*.js' -exec node --check {} +
+      - run: npm run check:migrations
+      - run: npm test
 
   mcp-check:
     runs-on: ubuntu-latest
