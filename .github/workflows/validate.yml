@@ -48,6 +48,54 @@ jobs:
       - run: npm run check:migrations
       - run: npm test
 
+  migration-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bazaar_migration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d bazaar_migration_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap minimal Supabase-compatible schema
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: bazaar_migration_test
+        run: psql -v ON_ERROR_STOP=1 -f backend/supabase/tests/migration-bootstrap.sql
+      - name: Apply new migrations in order
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: bazaar_migration_test
+        run: |
+          set -euo pipefail
+          for migration in backend/supabase/migrations/20261014000*.sql; do
+            echo "Applying $migration"
+            psql -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Assert expected schema and policy results
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: bazaar_migration_test
+        run: psql -v ON_ERROR_STOP=1 -f backend/supabase/tests/migration-assertions.sql
+
   mcp-check:
     runs-on: ubuntu-latest
     defaults:
