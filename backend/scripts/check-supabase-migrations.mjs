@@ -5,6 +5,16 @@ const migrationsDir = fileURLToPath(new URL("../supabase/migrations/", import.me
 const entries = (await readdir(migrationsDir)).filter((name) => name.endsWith(".sql")).sort();
 const errors = [];
 const versions = new Map();
+const requiredMigrations = [
+  "202610140001_article_admin_listing_indexes.sql",
+  "202610140002_idempotency_keys.sql",
+  "202610140003_idempotency_keys_claim_lease.sql",
+  "202610140004_pg_trgm_extensions_schema.sql",
+  "202610140005_cms_article_image_master_admin.sql",
+];
+for (const required of requiredMigrations) {
+  if (!entries.includes(required)) errors.push("Required migration is missing: " + required);
+}
 
 for (const filename of entries) {
   const match = /^(\d{12,14})_([a-z0-9_]+)\.sql$/.exec(filename);
