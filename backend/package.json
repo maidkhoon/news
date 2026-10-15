@@ -9,7 +9,8 @@
     "test": "node --test src/**/*.test.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "supabase:types": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID > src/types/database.ts"
+    "supabase:types": "supabase gen types typescript --project-id $SUPABASE_PROJECT_ID > src/types/database.ts",
+    "check:migrations": "node scripts/check-supabase-migrations.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.58.0",
