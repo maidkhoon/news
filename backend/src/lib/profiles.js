@@ -20,6 +20,15 @@ export async function ensureProfile(user) {
     })
     .select("id")
     .single();
-  if (insertError) throw insertError;
-  return inserted;
+  if (!insertError) return inserted;
+  if (insertError.code !== "23505") throw insertError;
+
+  // A concurrent request (e.g. a simultaneous device-register + profile-fetch
+  // on app launch) created the row between our lookup and our insert; use theirs.
+  const { data: retried, error: retryError } = await supabase.from("profiles")
+    .select("id")
+    .eq("id", user.id)
+    .single();
+  if (retryError) throw retryError;
+  return retried;
 }

@@ -29,27 +29,44 @@ router.patch("/me", async (req, res) => {
 
 router.get("/me", async (req, res) => {
   const user = req.authUser;
-  const { data: existing, error: lookupError } = await supabase.from("profiles")
-    .select("id")
-    .eq("id", user.id)
-    .maybeSingle();
-  if (lookupError) return res.status(500).json({ error: "Unable to load profile" });
-
   const profilePayload = {
-    id: user.id,
     phone: user.phone || null,
     email: user.email || null,
     updated_at: new Date().toISOString()
   };
-  const operation = existing
-    ? supabase.from("profiles").update({ phone: profilePayload.phone, email: profilePayload.email, updated_at: profilePayload.updated_at }).eq("id", user.id)
-    : supabase.from("profiles").insert(profilePayload);
-  const { data, error } = await operation.select("id,name,phone,email,role,status").single();
 
+  let { data, error } = await supabase.from("profiles")
+    .update(profilePayload)
+    .eq("id", user.id)
+    .select("id,name,phone,email,role,status")
+    .maybeSingle();
   if (error) {
     console.error("Profile bootstrap failed:", error.message);
     return res.status(500).json({ error: "Unable to load profile" });
   }
+
+  if (!data) {
+    const inserted = await supabase.from("profiles")
+      .insert({ id: user.id, ...profilePayload })
+      .select("id,name,phone,email,role,status")
+      .single();
+    if (inserted.error?.code === "23505") {
+      // A concurrent request (e.g. a simultaneous device-register call)
+      // created the row first; read what they wrote instead of erroring.
+      const retried = await supabase.from("profiles").select("id,name,phone,email,role,status").eq("id", user.id).single();
+      if (retried.error) {
+        console.error("Profile bootstrap failed:", retried.error.message);
+        return res.status(500).json({ error: "Unable to load profile" });
+      }
+      data = retried.data;
+    } else if (inserted.error) {
+      console.error("Profile bootstrap failed:", inserted.error.message);
+      return res.status(500).json({ error: "Unable to load profile" });
+    } else {
+      data = inserted.data;
+    }
+  }
+
   if (!data.status) return res.status(403).json({ error: "Account disabled" });
   return res.json({ data });
 });

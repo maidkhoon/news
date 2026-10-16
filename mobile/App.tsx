@@ -26,8 +26,10 @@ import {
   Platform,
 } from 'react-native'
 import type { Session } from '@supabase/supabase-js'
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { supabase, supabaseConfigError } from './lib/supabase'
 import { parseGoogleAuthCallback } from './lib/googleAuthCallback'
+import { searchArticles } from './lib/articleSearch'
 import AdminDashboard from './components/AdminDashboard'
 
 type AuthStep = 'phone' | 'otp'
@@ -58,6 +60,10 @@ type CryptoMover = { id: string; symbol: string; name: string; image: string | n
 type CryptoMovers = { count: number; currency: 'INR'; period: '24h'; gainers: CryptoMover[]; losers: CryptoMover[]; fetchedAt: string; provider: string; cached: boolean }
 type MemberProfile = { id: string; name: string | null; phone: string | null; email: string | null; role: string | null; status: boolean | null }
 
+// Base bottom padding the tab bar had before the Android safe-area fix;
+// kept as a shared constant so the inset add-on (below) can't drift from the
+// StyleSheet value it's layered on top of.
+const BOTTOM_NAV_BASE_PADDING = 5
 const SAVED_STORAGE_KEY = 'bazaarnexa:saved-article-ids'
 const TOPICS_STORAGE_KEY = 'bazaarnexa:briefing-topics'
 const DEFAULT_TOPICS = ['India', 'Crypto', 'Cricket']
@@ -180,6 +186,19 @@ function LoadingSkeleton({ compact = false }: { compact?: boolean }) {
 }
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <AppContent />
+    </SafeAreaProvider>
+  )
+}
+
+function AppContent() {
+  // react-native's own SafeAreaView is iOS-only and a no-op on Android, where
+  // this app's RN/Expo version renders edge-to-edge by default - without this,
+  // the fixed bottom tab bar has no way to know how tall the system gesture/
+  // nav bar is and renders flush against (or under) it.
+  const insets = useSafeAreaInsets()
   const [session, setSession] = useState<Session | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [initializing, setInitializing] = useState(true)
@@ -220,6 +239,14 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('Home')
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [searchResults, setSearchResults] = useState<Article[]>([])
+  const [searchPage, setSearchPage] = useState(1)
+  const [searchHasNextPage, setSearchHasNextPage] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [searchRetryTick, setSearchRetryTick] = useState(0)
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null)
   const [savedIds, setSavedIds] = useState<string[]>([])
   const [savedLoaded, setSavedLoaded] = useState(false)
@@ -237,6 +264,11 @@ export default function App() {
   const [chosenPlan, setChosenPlan] = useState<'BASIC' | 'PRO'>('BASIC')
   const [billingAction, setBillingAction] = useState<'purchase' | 'restore' | null>(null)
   const finishTransactionRef = useRef<((args: any) => Promise<any>) | null>(null)
+  const searchRequestIdRef = useRef(0)
+  const searchAbortRef = useRef<AbortController | null>(null)
+  // Search is only "live" while the search row is open; closing it falls back
+  // to the normal feed immediately even if a debounce/fetch is still pending.
+  const activeSearchQuery = searchOpen ? debouncedSearch.trim() : ''
 
   const resolveSessionScreen = useCallback(async (nextSession: Session | null) => {
     if (!nextSession) {
@@ -620,6 +652,79 @@ export default function App() {
     if (hasNextPage && !loadingMore && !feedLoading) void loadFeed({ nextPage: page + 1 })
   }, [hasNextPage, loadingMore, feedLoading, page, loadFeed])
 
+  // Debounce raw keystrokes before they trigger a network request.
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedSearch(search.trim()), 350)
+    return () => clearTimeout(handle)
+  }, [search])
+
+  // Backend-search the full article catalog (not just whatever pages happen
+  // to be loaded in `articles`), with abort-based cancellation and a
+  // request-id guard so a slow, superseded response can never clobber a
+  // newer one (e.g. the user kept typing after this request went out).
+  useEffect(() => {
+    searchAbortRef.current?.abort()
+    if (!activeSearchQuery) {
+      setSearchResults([])
+      setSearchError('')
+      setSearchHasNextPage(false)
+      setSearchPage(1)
+      setSearchLoading(false)
+      return
+    }
+
+    const requestId = ++searchRequestIdRef.current
+    const controller = new AbortController()
+    searchAbortRef.current = controller
+    setSearchLoading(true)
+    setSearchError('')
+
+    searchArticles(API_BASE, activeSearchQuery, 1, { signal: controller.signal })
+      .then(({ data, hasNextPage }) => {
+        if (searchRequestIdRef.current !== requestId) return
+        setSearchResults(data as Article[])
+        setSearchHasNextPage(hasNextPage)
+        setSearchPage(1)
+      })
+      .catch(error => {
+        if (controller.signal.aborted || searchRequestIdRef.current !== requestId) return
+        setSearchResults([])
+        setSearchHasNextPage(false)
+        setSearchError(error instanceof Error ? error.message : 'Unable to search research.')
+      })
+      .finally(() => {
+        if (searchRequestIdRef.current === requestId) setSearchLoading(false)
+      })
+
+    return () => controller.abort()
+  }, [activeSearchQuery, searchRetryTick])
+
+  const retrySearch = useCallback(() => setSearchRetryTick(tick => tick + 1), [])
+
+  const loadMoreSearchResults = useCallback(() => {
+    if (!activeSearchQuery || !searchHasNextPage || searchLoadingMore || searchLoading) return
+    const nextPage = searchPage + 1
+    const requestId = ++searchRequestIdRef.current
+    const controller = new AbortController()
+    searchAbortRef.current = controller
+    setSearchLoadingMore(true)
+
+    searchArticles(API_BASE, activeSearchQuery, nextPage, { signal: controller.signal })
+      .then(({ data, hasNextPage }) => {
+        if (searchRequestIdRef.current !== requestId) return
+        setSearchResults(current => [...current, ...(data as Article[])])
+        setSearchHasNextPage(hasNextPage)
+        setSearchPage(nextPage)
+      })
+      .catch(error => {
+        if (controller.signal.aborted || searchRequestIdRef.current !== requestId) return
+        setSearchError(error instanceof Error ? error.message : 'Unable to load more results.')
+      })
+      .finally(() => {
+        if (searchRequestIdRef.current === requestId) setSearchLoadingMore(false)
+      })
+  }, [activeSearchQuery, searchHasNextPage, searchLoadingMore, searchLoading, searchPage])
+
   const loadMemberData = useCallback(async (accessToken: string) => {
     const headers = { Authorization: `Bearer ${accessToken}` }
     try {
@@ -941,9 +1046,13 @@ export default function App() {
     [categories]
   )
 
+  // While a search is active, the backend (not the paginated home feed
+  // already in memory) is the source of articles - this is what lets search
+  // find older articles that were never loaded into `articles`. Category/tab
+  // filters still apply on top, exactly as they do for the normal feed.
   const visibleArticles = useMemo(() => {
-    let result = articles
-    if (filter === 'All' && tab === 'Home' && briefingTopics.length > 0) {
+    let result = activeSearchQuery ? searchResults : articles
+    if (!activeSearchQuery && filter === 'All' && tab === 'Home' && briefingTopics.length > 0) {
       result = result.filter(article => briefingTopics.some(topic => `${article.categories?.name || ''} ${article.categories?.slug || ''} ${article.title}`.toLowerCase().includes(topic.toLowerCase())))
     }
     const chosen = tab === 'Crypto' || tab === 'Cricket' ? tab : filter
@@ -953,9 +1062,8 @@ export default function App() {
       a.categories?.slug?.toLowerCase().includes('india') || a.categories?.name?.toLowerCase().includes('india') ||
       a.title.toLowerCase().includes('sensex') || a.slug.toLowerCase().includes('sensex') ||
       a.title.toLowerCase().includes('nifty') || a.slug.toLowerCase().includes('nifty'))
-    if (search.trim()) result = result.filter(a => a.title.toLowerCase().includes(search.trim().toLowerCase()))
     return result
-  }, [articles, filter, tab, search, briefingTopics])
+  }, [articles, searchResults, activeSearchQuery, filter, tab, briefingTopics])
 
   const signOut = async () => {
     await supabase.auth.signOut()
@@ -994,7 +1102,11 @@ export default function App() {
           <Text style={styles.backText}>‹  Continue browsing</Text>
         </Pressable>
         <View style={styles.authHero}>
-          <View style={styles.logo}><Text style={styles.logoGlyph}>↗</Text><Text style={styles.logoBars}>▥</Text></View>
+          <Image
+  source={require('./assets/icon.png')}
+  style={styles.logo}
+  resizeMode="contain"
+/>
           <Text style={styles.wordmark}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text>
           <Text style={styles.tagline}>India & Crypto Research</Text>
           <Text style={styles.authBrandPromise}>Smarter market insights. All in one place.</Text>
@@ -1196,7 +1308,11 @@ export default function App() {
       <SafeAreaView style={styles.screen}>
         <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
         <ScrollView contentContainerStyle={styles.purchaseSuccessContent}>
-          <View style={styles.successBrandLogo}><Text style={styles.successBrandArrow}>↗</Text><Text style={styles.successBrandBars}>▥</Text></View>
+          <Image
+  source={require('./assets/icon.png')}
+  style={styles.successBrandLogo}
+  resizeMode="contain"
+/>
           <View style={styles.successCheck}><Text style={styles.successCheckGlyph}>✓</Text></View>
           <Text style={styles.purchaseSuccessEyebrow}>BAZAARNEXA PREMIUM</Text>
           <Text style={styles.purchaseSuccessTitle}>You’re all set!</Text>
@@ -1375,6 +1491,14 @@ export default function App() {
     )
   }
 
+  const isSearching = Boolean(activeSearchQuery)
+  const feedListLoading = isSearching ? searchLoading : feedLoading
+  const feedListError = isSearching ? searchError : feedError
+  const feedListHasNextPage = isSearching ? searchHasNextPage : hasNextPage
+  const feedListLoadingMore = isSearching ? searchLoadingMore : loadingMore
+  const feedListLoadMore = isSearching ? loadMoreSearchResults : loadMoreArticles
+  const retryFeedList = isSearching ? retrySearch : () => loadFeed()
+
   return (
     <SafeAreaView style={styles.screen}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
@@ -1390,7 +1514,7 @@ export default function App() {
         </ScrollView> : <Text style={styles.tickerLoading}>Loading market data…</Text>}
       </View>
       <View style={styles.header}>
-        <View style={styles.brandMark}><Text style={styles.brandMarkText}>↗</Text></View>
+        <View style={styles.brandMark}><Image source={require('./assets/icon.png')} style={styles.headerBrandIcon} resizeMode="contain" accessibilityLabel="BazaarNexa logo" /></View>
         <View style={styles.headerCopy}><Text style={styles.headerTitle}>Bazaar<Text style={styles.wordmarkBlue}>Nexa</Text></Text><Text style={styles.headerSub}>INDIA & CRYPTO RESEARCH</Text></View>
         <Pressable onPress={() => { setSearchOpen(open => !open); setSearch('') }} style={styles.headerIcon} accessibilityRole="button" accessibilityLabel="Search"><Text style={styles.headerIconText}>⌕</Text></Pressable>
         <Pressable onPress={() => { setScreen('notifications'); if (session) void loadNotifications() }} style={styles.headerIcon} accessibilityRole="button" accessibilityLabel="Notifications"><Text style={styles.headerIconText}>♧</Text></Pressable>
@@ -1400,7 +1524,7 @@ export default function App() {
           <Pressable onPress={openSignIn} style={styles.signInPill} accessibilityRole="button" accessibilityLabel="Sign in"><Text style={styles.signInPillText}>Sign in</Text></Pressable>
         )}
       </View>
-      {searchOpen ? <View style={styles.searchRow}><TextInput autoFocus value={search} onChangeText={setSearch} placeholder="Search research…" placeholderTextColor={COLORS.muted} style={styles.searchInput} /></View> : null}
+      {searchOpen ? <View style={styles.searchRow}><TextInput autoFocus value={search} onChangeText={setSearch} placeholder="Search research…" placeholderTextColor={COLORS.muted} style={styles.searchInput} returnKeyType="search" />{searchLoading ? <ActivityIndicator color={COLORS.blue} style={styles.searchSpinner} /> : null}</View> : null}
       <FlatList
         data={visibleArticles}
         keyExtractor={article => article.id}
@@ -1497,10 +1621,12 @@ export default function App() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
               {FILTERS.map(item => <Pressable key={item} onPress={() => { setFilter(item); setTab(item === 'Crypto' ? 'Crypto' : item === 'Cricket' ? 'Cricket' : 'Home') }} style={[styles.filterPill, filter === item && tab === 'Home' && styles.filterPillActive]}><Text style={[styles.filterText, filter === item && tab === 'Home' && styles.filterTextActive]}>{item}</Text></Pressable>)}
             </ScrollView>
-            {feedLoading && articles.length === 0 ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>Loading the newsroom…</Text></View> : null}
-            {feedError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Couldn’t load research</Text><Text style={styles.muted}>{feedError}</Text><Pressable onPress={() => loadFeed()} style={styles.retryButton} accessibilityRole="button" accessibilityLabel="Try again"><Text style={styles.retryText}>Try again</Text></Pressable></View> : null}
-            {!feedLoading && !feedError && visibleArticles.length === 0 ? (
-              tab === 'Cricket' && !hasCricketCategory ? (
+            {feedListLoading && visibleArticles.length === 0 ? <View style={styles.stateCard}><ActivityIndicator color={COLORS.blue} /><Text style={styles.muted}>{isSearching ? 'Searching research…' : 'Loading the newsroom…'}</Text></View> : null}
+            {feedListError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>{isSearching ? 'Search failed' : 'Couldn’t load research'}</Text><Text style={styles.muted}>{feedListError}</Text><Pressable onPress={retryFeedList} style={styles.retryButton} accessibilityRole="button" accessibilityLabel="Try again"><Text style={styles.retryText}>Try again</Text></Pressable></View> : null}
+            {!feedListLoading && !feedListError && visibleArticles.length === 0 ? (
+              isSearching ? (
+                <View style={styles.stateCard}><Text style={styles.stateTitle}>No matching research found</Text><Text style={styles.muted}>Try a different search term, or clear the search to browse the full feed.</Text></View>
+              ) : tab === 'Cricket' && !hasCricketCategory ? (
                 <View style={styles.stateCard}><Text style={styles.stateTitle}>Cricket coverage isn’t available yet</Text><Text style={styles.muted}>BazaarNexa hasn’t published a Cricket category yet. Check back soon.</Text></View>
               ) : (
                 <View style={styles.stateCard}><Text style={styles.stateTitle}>No articles yet</Text><Text style={styles.muted}>Published articles matching this section will appear here. Pull down to refresh.</Text></View>
@@ -1510,16 +1636,16 @@ export default function App() {
         }
         ListFooterComponent={
           <>
-            {hasNextPage ? (
-              <Pressable onPress={loadMoreArticles} disabled={loadingMore} style={[styles.retryButton, styles.loadMoreButton, loadingMore && styles.disabled]}>
-                {loadingMore ? <ActivityIndicator color="#fff" /> : <Text style={styles.retryText}>Load more research</Text>}
+            {feedListHasNextPage ? (
+              <Pressable onPress={feedListLoadMore} disabled={feedListLoadingMore} style={[styles.retryButton, styles.loadMoreButton, feedListLoadingMore && styles.disabled]}>
+                {feedListLoadingMore ? <ActivityIndicator color="#fff" /> : <Text style={styles.retryText}>{isSearching ? 'Load more results' : 'Load more research'}</Text>}
               </Pressable>
             ) : null}
             <Text style={styles.disclaimer}>BazaarNexa provides research and educational information only. Nothing here is a recommendation to buy or sell securities or crypto assets.</Text>
           </>
         }
       />
-      <View style={styles.bottomNav}>
+      <View style={[styles.bottomNav, Platform.OS === 'android' && { paddingBottom: BOTTOM_NAV_BASE_PADDING + insets.bottom }]}>
         {NAV_TABS.map((item, index) => <Pressable key={item} onPress={() => { setScreen('home'); setTab(item); setFilter(item === 'Crypto' || item === 'Cricket' ? item : item === 'Home' || item === 'NSE' || item === 'BSE' ? 'All' : item) }} style={styles.navItem} accessibilityRole="tab" accessibilityLabel={item} accessibilityState={{ selected: tab === item }}><Text style={[styles.navIcon, tab === item && styles.navActive]}>{NAV_ICONS[index]}</Text><Text style={[styles.navLabel, tab === item && styles.navActive]}>{item}</Text><View style={[styles.navDot, tab === item && styles.navDotActive]} /></Pressable>)}
       </View>
     </SafeAreaView>
@@ -1561,7 +1687,12 @@ const styles = StyleSheet.create({
   popularPlanBadge: { alignSelf: 'flex-start', backgroundColor: '#123D37', borderColor: '#246F5E', borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, marginBottom: 10 },
   popularPlanBadgeText: { color: '#5BE0B0', fontSize: 9, fontWeight: '900', letterSpacing: 1 },
   purchaseSuccessContent: { flexGrow: 1, paddingHorizontal: 24, paddingVertical: 36, alignItems: 'center', justifyContent: 'center', gap: 15 },
-  successBrandLogo: { width: 64, height: 64, borderRadius: 19, backgroundColor: '#073C78', borderWidth: 1, borderColor: '#197FE4', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  successBrandLogo: {
+  width: 64,
+  height: 64,
+  borderRadius: 19,
+  marginBottom: 4,
+},
   successBrandArrow: { color: '#42C6FF', fontSize: 42, fontWeight: '900', position: 'absolute', top: 0, right: 10 },
   successBrandBars: { color: '#FFFFFF', fontSize: 26, fontWeight: '900', position: 'absolute', bottom: 5, left: 12 },
   successCheck: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#123D37', borderWidth: 1, borderColor: '#2ED59A', alignItems: 'center', justifyContent: 'center', marginTop: 8 },
@@ -1617,7 +1748,12 @@ const styles = StyleSheet.create({
   authScreen: { flex: 1, paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0, backgroundColor: COLORS.background, paddingHorizontal: 22, justifyContent: 'center' },
   authBackButton: { position: 'absolute', top: 54, left: 18, zIndex: 10, padding: 6 },
   authHero: { alignItems: 'center', marginBottom: 30 },
-  logo: { width: 76, height: 76, borderRadius: 22, backgroundColor: '#073C78', borderWidth: 1, borderColor: '#197FE4', alignItems: 'center', justifyContent: 'center', marginBottom: 15 },
+  logo: {
+  width: 76,
+  height: 76,
+  borderRadius: 22,
+  marginBottom: 15,
+},
   logoGlyph: { color: '#42C6FF', fontSize: 48, fontWeight: '900', position: 'absolute', top: 1, right: 13 },
   logoBars: { color: '#FFFFFF', fontSize: 31, fontWeight: '900', position: 'absolute', bottom: 7, left: 15 },
   wordmark: { color: '#FFFFFF', fontSize: 31, fontWeight: '800', letterSpacing: -1 },
@@ -1663,8 +1799,8 @@ const styles = StyleSheet.create({
   tickerSeparator: { color: '#334155', fontSize: 7, marginLeft: 5 },
   tickerLoading: { color: '#64748B', fontSize: 10, flex: 1, textAlign: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#112A43', gap: 9 },
-  brandMark: { width: 39, height: 39, borderRadius: 11, backgroundColor: '#0752A2', alignItems: 'center', justifyContent: 'center' },
-  brandMarkText: { color: '#49D3FF', fontSize: 32, fontWeight: '900', marginTop: -4 },
+  brandMark: { width: 39, height: 39, borderRadius: 11, backgroundColor: '#0752A2', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  headerBrandIcon: { width: 39, height: 39 },
   headerCopy: { flex: 1 },
   headerTitle: { color: COLORS.text, fontSize: 18, fontWeight: '800', letterSpacing: -0.4 },
   headerSub: { color: COLORS.muted, fontSize: 8, letterSpacing: 1.3, marginTop: 2 },
@@ -1674,8 +1810,9 @@ const styles = StyleSheet.create({
   avatarText: { color: COLORS.blueLight, fontSize: 14 },
   signInPill: { borderWidth: 1, borderColor: COLORS.blue, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 7 },
   signInPillText: { color: COLORS.blueLight, fontSize: 12, fontWeight: '800' },
-  searchRow: { paddingHorizontal: 16, paddingTop: 10 },
-  searchInput: { backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10, color: COLORS.text },
+  searchRow: { paddingHorizontal: 16, paddingTop: 10, flexDirection: 'row', alignItems: 'center' },
+  searchInput: { flex: 1, backgroundColor: COLORS.surface, borderColor: COLORS.border, borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10, color: COLORS.text },
+  searchSpinner: { position: 'absolute', right: 13 },
   feedContent: { paddingHorizontal: 15, paddingBottom: 18 },
   indexPanel: { backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.border, borderRadius: 16, padding: 13, marginBottom: 14 },
   indexRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
@@ -1730,7 +1867,7 @@ const styles = StyleSheet.create({
   articleBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 7 },
   readMore: { color: COLORS.blueLight, fontSize: 10, fontWeight: '800' },
   bookmark: { color: COLORS.text, fontSize: 18 },
-  bottomNav: { flexDirection: 'row', backgroundColor: '#07182A', borderTopWidth: 1, borderTopColor: '#1B3550', paddingTop: 8, paddingBottom: 5, paddingHorizontal: 8 },
+  bottomNav: { flexDirection: 'row', backgroundColor: '#07182A', borderTopWidth: 1, borderTopColor: '#1B3550', paddingTop: 8, paddingBottom: BOTTOM_NAV_BASE_PADDING, paddingHorizontal: 8 },
   navItem: { flex: 1, alignItems: 'center', gap: 2 },
   navIcon: { color: '#91A8C1', fontSize: 23, fontWeight: '700' },
   navLabel: { color: '#8CA2BB', fontSize: 10, fontWeight: '700' },

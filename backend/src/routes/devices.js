@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { supabase } from "../lib/supabase.js";
 import { requireUser } from "../middleware/require-user.js";
+import { ensureProfile } from "../lib/profiles.js";
 
 const router = Router();
 
@@ -16,21 +17,11 @@ router.post("/register", async (req, res) => {
   }
 
   const user = req.authUser;
-  const { data: profile, error: profileLookupError } = await supabase.from("profiles")
-    .select("id")
-    .eq("id", user.id)
-    .maybeSingle();
-  if (profileLookupError) return res.status(500).json({ error: "Unable to register device" });
-  if (!profile) {
-    const { error: profileInsertError } = await supabase.from("profiles").insert({
-      id: user.id,
-      phone: user.phone || null,
-      email: user.email || null
-    });
-    if (profileInsertError) {
-      console.error("Device profile bootstrap failed:", profileInsertError.message);
-      return res.status(500).json({ error: "Unable to register device" });
-    }
+  try {
+    await ensureProfile(user);
+  } catch (error) {
+    console.error("Device profile bootstrap failed:", error.message);
+    return res.status(500).json({ error: "Unable to register device" });
   }
 
   const { data, error } = await supabase.from("devices").upsert({

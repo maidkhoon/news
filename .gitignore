@@ -9,3 +9,8 @@ build/
 coverage/
 *.log
 .DS_Store
+
+.idea/
+mobile/android/.gradle/
+mobile/android/app/.cxx/
+mobile/android/local.properties
