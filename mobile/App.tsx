@@ -112,6 +112,73 @@ function readableDate(value?: string | null) {
   return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
 
+function LoadingSkeleton({ compact = false }: { compact?: boolean }) {
+  const block = (width: number | string, height: number, extra: object = {}) => (
+    <View style={[{ width, height, borderRadius: 7, backgroundColor: '#18334F' }, extra]} />
+  )
+
+  if (compact) {
+    return (
+      <View accessibilityLabel="Loading articles" accessibilityRole="progressbar" style={{ paddingTop: 6, paddingBottom: 18 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 15 }}>
+          <ActivityIndicator color="#45B8FF" size="small" />
+          <Text style={{ color: '#9AB0C9', fontSize: 12 }}>Loading the latest research…</Text>
+        </View>
+        {[0, 1, 2, 3].map(item => (
+          <View key={item} style={{ flexDirection: 'row', gap: 12, backgroundColor: '#0D2034', borderColor: '#183551', borderWidth: 1, borderRadius: 15, padding: 10, marginBottom: 11 }}>
+            {block(106, 124, { borderRadius: 10, backgroundColor: '#143B5D' })}
+            <View style={{ flex: 1, justifyContent: 'center', gap: 9 }}>
+              {block(78, 13, { backgroundColor: '#20516B' })}
+              {block('96%', 13)}
+              {block('84%', 13)}
+              {block('68%', 13)}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                {block(65, 10, { backgroundColor: '#20516B' })}
+                {block(18, 14)}
+              </View>
+            </View>
+          </View>
+        ))}
+      </View>
+    )
+  }
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#061426', paddingHorizontal: 16, paddingTop: 24 }}>
+      <StatusBar barStyle="light-content" backgroundColor="#061426" />
+      <View style={{ alignItems: 'center', marginBottom: 28, marginTop: 18 }}>
+        <View style={{ width: 58, height: 58, borderRadius: 17, backgroundColor: '#0752A2', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+          <Text style={{ color: '#49D3FF', fontSize: 38, fontWeight: '900' }}>↗</Text>
+        </View>
+        <Text style={{ color: '#FFFFFF', fontSize: 27, fontWeight: '800' }}>Bazaar<Text style={{ color: '#45B8FF' }}>Nexa</Text></Text>
+        <Text style={{ color: '#8FA8C4', fontSize: 11, letterSpacing: 1.5, marginTop: 5 }}>INDIA & CRYPTO RESEARCH</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 18 }}>
+          <ActivityIndicator color="#45B8FF" size="small" />
+          <Text style={{ color: '#9AB0C9', fontSize: 12 }}>Getting your app ready…</Text>
+        </View>
+      </View>
+      {block('42%', 10, { marginBottom: 14, backgroundColor: '#20516B' })}
+      {block('78%', 25, { marginBottom: 22 })}
+      <View style={{ height: 170, borderRadius: 18, backgroundColor: '#0D2A47', borderWidth: 1, borderColor: '#183551', marginBottom: 20, padding: 16, justifyContent: 'flex-end', gap: 10 }}>
+        {block(90, 12, { backgroundColor: '#20516B' })}
+        {block('94%', 20)}
+        {block('72%', 15)}
+      </View>
+      {[0, 1, 2].map(item => (
+        <View key={item} style={{ flexDirection: 'row', gap: 12, marginBottom: 13, padding: 10, borderRadius: 14, backgroundColor: '#0D2034', borderWidth: 1, borderColor: '#183551' }}>
+          {block(84, 88, { backgroundColor: '#143B5D' })}
+          <View style={{ flex: 1, justifyContent: 'center', gap: 9 }}>
+            {block(75, 11, { backgroundColor: '#20516B' })}
+            {block('98%', 13)}
+            {block('82%', 13)}
+            {block('60%', 13)}
+          </View>
+        </View>
+      ))}
+    </SafeAreaView>
+  )
+}
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -916,7 +983,7 @@ export default function App() {
   }
 
   if (initializing) {
-    return <SafeAreaView style={styles.loadingScreen}><StatusBar barStyle="light-content" backgroundColor={COLORS.background} /><ActivityIndicator color={COLORS.blue} size="large" /><Text style={styles.muted}>Preparing BazaarNexa…</Text></SafeAreaView>
+    return <LoadingSkeleton />
   }
 
   if (screen === 'auth') {
@@ -1354,6 +1421,7 @@ export default function App() {
             </View>
           </Pressable>
         )}
+        ListEmptyComponent={feedLoading ? <LoadingSkeleton compact /> : feedError ? <View style={styles.stateCard}><Text style={styles.stateTitle}>Could not load research</Text><Text style={styles.muted}>{feedError}</Text><Pressable onPress={() => void loadFeed()} style={styles.retryButton} accessibilityRole="button"><Text style={styles.retryText}>Try again</Text></Pressable></View> : null}
         ListHeaderComponent={
           <>
             {tab === 'Crypto' ? (
